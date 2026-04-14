@@ -1,0 +1,504 @@
+# Project Overview
+
+This project is a **Python-based infrastructure automation tool** that automatically deploys a complete enterprise-style lab environment using **Microsoft Hyper-V**.
+
+The system reads a configuration file (`ACME_Automation_Steps.json`) and builds an entire domain network automatically, including virtual machines, networking, directory services, storage systems, and security policies.
+
+The environment includes:
+
+* **Windows Server 2022** for domain infrastructure
+* **Windows 11** for client systems
+* **Ubuntu Server (Apache)** for web services
+* **Active Directory** for identity and access management
+
+Unlike traditional labs, **every component is built from scratch by the automation system**, including routers, servers, and storage systems.
+
+---
+
+# What the Project Automatically Builds
+
+The system creates a **fully functional enterprise lab environment** that simulates real-world infrastructure.
+
+---
+
+# 🖥️ Virtual Infrastructure Creation
+
+The program automatically provisions:
+
+• Virtual network (Hyper-V switch)
+• Router VM (AcmeRtr01)
+• Primary Domain Controller (AcmePDC01)
+• Secondary Server / Storage Node (AcmePDC02)
+• Workstation VM (AcmeWks1001)
+• Web Server VM (Ubuntu / Apache)
+
+All systems are deployed via **PowerShell automation executed from Python**.
+
+---
+
+# 🌐 Automatic Router Creation
+
+The router VM is fully automated and replaces the need for prebuilt appliances.
+
+The router:
+
+• is created dynamically
+• has dual network adapters
+• is configured for NAT
+• routes traffic between lab and host network
+
+Responsibilities:
+
+• Default gateway for all lab systems
+• Internet access via NAT
+• Internal traffic routing
+
+---
+
+# 🏢 Domain Controller Deployment
+
+The primary server (AcmePDC01) is configured as the domain controller.
+
+Automatically installs:
+
+• Active Directory Domain Services
+• DNS
+• DHCP
+
+Domain example:
+
+```
+ad.acme.edu
+```
+
+---
+
+# 🧱 Active Directory Structure
+
+The system builds a full OU hierarchy:
+
+```
+CorporateOffice
+├── Users
+├── Computers
+├── IT
+└── Users/SecTest
+```
+
+---
+
+# 👥 User and Security Group Automation
+
+Users are created automatically from config.
+
+Example:
+
+```
+SecTest
+CorpUser
+```
+
+Security model:
+
+```
+AGDLP
+Accounts → Global → Domain Local → Permissions
+```
+
+---
+
+# 📁 Shared Storage and File Services
+
+The environment provisions shared folders:
+
+```
+Users$
+PUB
+APPS
+```
+
+Drive mappings:
+
+```
+H: → Home directory
+I: → Shared storage
+```
+
+---
+
+# 💽 Advanced Storage System (AcmePDC02)
+
+A second server (**AcmePDC02**) is deployed for enterprise storage simulation.
+
+This includes:
+
+### Disk Configuration
+
+• 5 × 30GB disks
+• 1 × 50GB disk
+
+### Storage Features
+
+• Simple volume (G:)
+• Storage Pool (Pool1)
+• RAID-like parity virtual disks
+• Volumes:
+
+```
+E: → Vol1 (RAID / Parity)
+F: → Vol2 (RAID / Parity)
+G: → Vol3 (Simple Disk)
+```
+
+### Shared Folders
+
+```
+Vol1Test
+Vol3Test
+```
+
+---
+
+# 🧪 Failure Simulation System
+
+The lab includes **real-world failure scenarios**:
+
+### Simulated Events
+
+• Simple disk failure (data loss)
+• RAID disk failure (degraded performance)
+• RAID rebuild and repair
+
+### Learning Outcomes
+
+• Difference between simple vs resilient storage
+• Data availability under failure
+• Recovery workflows
+
+---
+
+# 💾 Backup and Recovery System
+
+The system installs and configures:
+
+• Windows Server Backup
+
+### Backup Features
+
+• Custom backup jobs
+• Remote backup storage
+• Volume-level backup (E:, F:, G:)
+
+### Recovery Capabilities
+
+• File-level restore
+• Recovery to alternate volumes
+• Disaster recovery simulation
+
+---
+
+# 🌐 DNS Infrastructure
+
+The system configures enterprise DNS features:
+
+### Records Created
+
+• A Records (Host records)
+• CNAME (Aliases)
+• MX Records (Mail routing)
+
+### Advanced Features
+
+• Reverse Lookup Zone
+• DNS cache flushing scenarios
+• Name resolution testing
+
+---
+
+# 🌍 Web Server (Ubuntu + Apache)
+
+A Linux-based web server is included:
+
+### Features
+
+• Ubuntu Server VM deployment
+• Apache web server
+• Static site hosting
+
+### Example Access
+
+```
+http://192.168.4.45
+http://testweb.ad.acme.edu
+http://b2b.ad.acme.edu
+```
+
+This introduces **cross-platform infrastructure (Windows + Linux)**.
+
+---
+
+# 📡 DHCP Configuration
+
+DHCP is fully automated.
+
+Scope example:
+
+```
+192.168.4.100 – 192.168.4.249
+```
+
+Provides:
+
+• IP addresses
+• DNS server
+• Default gateway
+• Domain name
+
+### Advanced DHCP Features
+
+• Reservations for servers
+• WINS configuration
+• Scope customization
+
+---
+
+# 🔐 Group Policy Deployment
+
+Security policies include:
+
+### Password Policy
+
+• Minimum length
+• Expiration
+
+### Account Security
+
+• Lockout rules
+
+### System Security
+
+• Login banner
+• Hide last user
+• Timeout settings
+
+### Environment Config
+
+• Desktop settings
+• Drive mappings
+
+---
+
+# 🖥️ Domain Join Automation
+
+Workstation VM automatically:
+
+• Joins domain
+• Receives GPOs
+• Maps drives
+• Gets proper OU placement
+
+---
+🧠 Module Responsibilities
+core/
+
+Handles all infrastructure orchestration and system-level automation logic.
+
+hyperv_manager.py → VM lifecycle and Hyper-V control
+vm_creator.py → VM creation logic
+network_config.py → virtual networking
+orchestrator.py → step execution pipeline
+progress_tracker.py → deployment tracking
+validators.py → environment validation
+
+New Advanced Modules:
+
+storage_manager.py → disk management, storage pools, RAID
+backup_manager.py → backup and restore operations
+dns_manager.py → DNS server configuration logic
+linux_manager.py → Ubuntu server + Apache automation
+
+domain/
+
+Handles Active Directory and domain-level configuration.
+
+ad_installer.py → AD DS installation and promotion
+dhcp_config.py → DHCP scope configuration
+ou_manager.py → OU creation
+user_manager.py → users and groups
+
+New Additions:
+
+dns_records.py → A, CNAME, MX records
+dhcp_reservations.py → DHCP reservations and WINS
+infrastructure/
+
+Handles post-deployment configuration and system behavior.
+
+domain_join.py → domain joining
+gpo_manager.py → group policy configuration
+shares.py → shared folders
+
+New:
+
+failure_simulator.py → disk failures, RAID degradation, recovery
+utils/
+
+Provides low-level execution tools and helpers.
+
+powershell_runner.py → executes PowerShell commands
+ssh_runner.py → executes remote Linux commands (Ubuntu server)
+checkpoint.py → step persistence system
+logger.py → logging system
+unattended/
+
+Contains automated installation configuration files.
+
+install_media/
+
+Stores ISO files for:
+
+Windows Server 2022
+Windows 11
+(Future: Ubuntu Server ISO)
+LabVMs/
+
+All virtual machines and disks are stored here for easy cleanup.
+
+logs/
+
+Stores deployment logs for debugging and auditing
+---
+
+# 📁 Single-Folder Lab Design
+
+All infrastructure is contained in one directory:
+
+```
+LabVMs/
+├── AcmeRtr01
+├── AcmePDC01
+├── AcmePDC02
+├── AcmeWks1001
+├── AcmeWeb01
+└── Logs
+```
+
+This allows:
+
+• Easy cleanup
+• No leftover artifacts
+• Rapid redeployment
+
+---
+
+# 🧠 Project Architecture
+
+Updated modular structure:
+
+Lab Deployment
+│
+├── ACME_Automation_Steps.json
+├── config_loader.py
+├── main.py
+├── destroy_lab.ps1
+├── Project-Overview.txt
+│
+├── core
+│   ├── hyperv_manager.py
+│   ├── vm_creator.py
+│   ├── network_config.py
+│   ├── orchestrator.py
+│   ├── progress_tracker.py
+│   ├── validators.py
+│   ├── storage_manager.py
+│   ├── backup_manager.py
+│   ├── dns_manager.py
+│   ├── linux_manager.py
+│   └── __init__.py
+│
+├── domain
+│   ├── ad_installer.py
+│   ├── dhcp_config.py
+│   ├── dhcp_reservations.py
+│   ├── dns_records.py
+│   ├── ou_manager.py
+│   ├── user_manager.py
+│   └── __init__.py
+│
+├── infrastructure
+│   ├── domain_join.py
+│   ├── gpo_manager.py
+│   ├── shares.py
+│   ├── failure_simulator.py
+│   └── __init__.py
+│
+├── utils
+│   ├── powershell_runner.py
+│   ├── ssh_runner.py
+│   ├── checkpoint.py
+│   ├── logger.py
+│   └── __init__.py
+│
+├── unattended
+│   ├── server_autounattend.xml
+│   ├── workstation_autounattend.xml
+│
+├── install_media
+│   ├── SERVER_EVAL_x64FRE_en-us.iso
+│   ├── Windows_11_Eval.iso
+│
+├── LabVMs
+├── logs
+│   └── deployment.log
+│
+└── __pycache__
+
+---
+
+# 🚀 Deployment Workflow
+
+Full pipeline:
+
+1. Load configuration
+2. Create virtual network
+3. Deploy router
+4. Configure NAT
+5. Deploy domain controller
+6. Install AD, DNS, DHCP
+7. Configure AD structure
+8. Create users/groups
+9. Deploy storage server (PDC02)
+10. Configure disks and RAID
+11. Create shares
+12. Install backup system
+13. Run backup job
+14. Deploy Ubuntu web server
+15. Configure DNS records
+16. Configure DHCP advanced settings
+17. Deploy workstation
+18. Join domain
+19. Apply GPOs
+20. Run validation checks
+
+---
+
+# 🧹 Automated Lab Cleanup
+
+The project includes a full teardown script:
+
+```
+.\destroy_lab.ps1
+```
+
+Removes:
+
+• All VMs
+• Virtual switches
+• Disk files
+• Entire lab directory
+
+This enables:
+
+• Rapid resets
+• Clean testing cycles
+• Repeatable deployments

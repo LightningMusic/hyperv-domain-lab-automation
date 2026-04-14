@@ -1,0 +1,20 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore logs
+logs/*.log
+
+# Ignore VM storage
+LabVMs/
+
+# Ignore install media (VERY IMPORTANT)
+install_media/*.iso
+
+# Ignore OS-generated junk
+Thumbs.db
+.DS_Store
+
+# Ignore virtual environments (if you ever add one)
+venv/
+.env/
