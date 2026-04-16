@@ -1,5 +1,34 @@
 from utils.powershell_runner import run_ps
 
+import shutil
+
+class PreRunValidator:
+
+    def __init__(self, required_gb=150):
+        self.required_gb = required_gb
+
+    def check_disk_space(self, path):
+        total, used, free = shutil.disk_usage(path)
+
+        free_gb = free / (1024 ** 3)
+
+        return {
+            "free_gb": round(free_gb, 2),
+            "required_gb": self.required_gb,
+            "ok": free_gb >= self.required_gb
+        }
+
+    def validate_or_exit(self, path):
+        result = self.check_disk_space(path)
+
+        if not result["ok"]:
+            raise Exception(
+                f"Not enough disk space. "
+                f"Free: {result['free_gb']} GB, "
+                f"Required: {result['required_gb']} GB"
+            )
+
+        return result
 
 def safe_output(result):
     return (result or "").lower()
@@ -48,7 +77,7 @@ def dhcp_configured():
 def is_domain_joined(vm):
     ps = f"""
 Invoke-Command -VMName "{vm}" -ScriptBlock {{
-(Get-WmiObject Win32_ComputerSystem).PartOfDomain
+    (Get-WmiObject Win32_ComputerSystem).PartOfDomain
 }} -ErrorAction SilentlyContinue
 """
     result = run_ps(ps, return_output=True)
@@ -63,7 +92,7 @@ Invoke-Command -VMName "{vm}" -ScriptBlock {{
 def gpo_applied(vm):
     ps = f"""
 Invoke-Command -VMName "{vm}" -ScriptBlock {{
-gpresult /r
+    gpresult /r
 }} -ErrorAction SilentlyContinue
 """
     result = run_ps(ps, return_output=True)

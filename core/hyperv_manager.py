@@ -6,7 +6,7 @@ LAB_ROOT = r"C:\CVNP-Python\Python Projects\Lab Deployment\LabVMs"
 SERVER_ISO = r"C:\CVNP-Python\Python Projects\Lab Deployment\install_media\SERVER_EVAL_x64FRE_en-us.iso"
 WIN11_ISO = r"C:\CVNP-Python\Python Projects\Lab Deployment\install_media\Windows_11_Eval.iso"
 
-SWITCH_NAME = "ACME-LabSwitch"
+SWITCH_NAME = vm_config["network"]
 
 ROUTER_VM = "ACME-Router"
 DC_VM = "ACME-DC01"
@@ -21,8 +21,9 @@ WORKSTATION_UNATTEND = os.path.join(UNATTEND_DIR, "workstation_autounattend.xml"
 CHECKPOINT_FILE = os.path.join(LAB_ROOT, "deployment_state.txt")
 
 # ------------------------------------------------
-# Environment Validation
+# Checkpoint Helpers
 # ------------------------------------------------
+
 def run_step(step_name, func):
     current = load_checkpoint()
 
@@ -31,10 +32,9 @@ def run_step(step_name, func):
         return
 
     print(f"[RUN] {step_name}")
-
     func()
-
     save_checkpoint(step_name)
+
 
 def save_checkpoint(step):
     with open(CHECKPOINT_FILE, "w") as f:
@@ -46,6 +46,11 @@ def load_checkpoint():
         return None
     with open(CHECKPOINT_FILE, "r") as f:
         return f.read().strip()
+
+
+# ------------------------------------------------
+# Environment Validation
+# ------------------------------------------------
 
 def verify_hyperv_installed():
     print("Checking Hyper-V installation...")
@@ -71,23 +76,20 @@ def verify_iso_files():
 
 def create_lab_directory():
     print("Creating lab directory...")
-
     os.makedirs(LAB_ROOT, exist_ok=True)
 
+
 def create_unattend_directory():
-
     print("Creating unattended install directory")
-
     os.makedirs(UNATTEND_DIR, exist_ok=True)
+
 
 # ------------------------------------------------
 # XML Unattended Install Generation
 # ------------------------------------------------
 
 def generate_router_unattend():
-
-    xml = f"""
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+    xml = f"""<unattend xmlns="urn:schemas-microsoft-com:unattend">
 
   <settings pass="windowsPE">
     <component name="Microsoft-Windows-Setup">
@@ -111,21 +113,18 @@ def generate_router_unattend():
         <Disk wcm:action="add">
           <DiskID>0</DiskID>
           <WillWipeDisk>true</WillWipeDisk>
-
           <CreatePartitions>
             <CreatePartition wcm:action="add">
               <Order>1</Order>
               <Type>Primary</Type>
               <Size>100</Size>
             </CreatePartition>
-
             <CreatePartition wcm:action="add">
               <Order>2</Order>
               <Type>Primary</Type>
               <Extend>true</Extend>
             </CreatePartition>
           </CreatePartitions>
-
           <ModifyPartitions>
             <ModifyPartition wcm:action="add">
               <Order>1</Order>
@@ -133,7 +132,6 @@ def generate_router_unattend():
               <Format>NTFS</Format>
               <Label>System</Label>
             </ModifyPartition>
-
             <ModifyPartition wcm:action="add">
               <Order>2</Order>
               <PartitionID>2</PartitionID>
@@ -142,7 +140,6 @@ def generate_router_unattend():
               <Letter>C</Letter>
             </ModifyPartition>
           </ModifyPartitions>
-
         </Disk>
       </DiskConfiguration>
 
@@ -186,14 +183,12 @@ def generate_router_unattend():
 
 </unattend>
 """
-
     with open(ROUTER_UNATTEND, "w", encoding="utf-8") as f:
         f.write(xml)
 
-def generate_domain_controller_unattend():
 
-    xml = f"""
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+def generate_domain_controller_unattend():
+    xml = f"""<unattend xmlns="urn:schemas-microsoft-com:unattend">
 
   <settings pass="windowsPE">
     <component name="Microsoft-Windows-Setup">
@@ -217,21 +212,18 @@ def generate_domain_controller_unattend():
         <Disk wcm:action="add">
           <DiskID>0</DiskID>
           <WillWipeDisk>true</WillWipeDisk>
-
           <CreatePartitions>
             <CreatePartition wcm:action="add">
               <Order>1</Order>
               <Type>Primary</Type>
               <Size>100</Size>
             </CreatePartition>
-
             <CreatePartition wcm:action="add">
               <Order>2</Order>
               <Type>Primary</Type>
               <Extend>true</Extend>
             </CreatePartition>
           </CreatePartitions>
-
           <ModifyPartitions>
             <ModifyPartition wcm:action="add">
               <Order>1</Order>
@@ -239,7 +231,6 @@ def generate_domain_controller_unattend():
               <Format>NTFS</Format>
               <Label>System</Label>
             </ModifyPartition>
-
             <ModifyPartition wcm:action="add">
               <Order>2</Order>
               <PartitionID>2</PartitionID>
@@ -248,7 +239,6 @@ def generate_domain_controller_unattend():
               <Letter>C</Letter>
             </ModifyPartition>
           </ModifyPartitions>
-
         </Disk>
       </DiskConfiguration>
 
@@ -292,14 +282,12 @@ def generate_domain_controller_unattend():
 
 </unattend>
 """
-
     with open(DC_UNATTEND, "w", encoding="utf-8") as f:
         f.write(xml)
 
-def generate_workstation_unattend():
 
-    xml = f"""
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+def generate_workstation_unattend():
+    xml = f"""<unattend xmlns="urn:schemas-microsoft-com:unattend">
 
   <settings pass="windowsPE">
     <component name="Microsoft-Windows-Setup">
@@ -323,21 +311,18 @@ def generate_workstation_unattend():
         <Disk wcm:action="add">
           <DiskID>0</DiskID>
           <WillWipeDisk>true</WillWipeDisk>
-
           <CreatePartitions>
             <CreatePartition wcm:action="add">
               <Order>1</Order>
               <Type>Primary</Type>
               <Size>100</Size>
             </CreatePartition>
-
             <CreatePartition wcm:action="add">
               <Order>2</Order>
               <Type>Primary</Type>
               <Extend>true</Extend>
             </CreatePartition>
           </CreatePartitions>
-
           <ModifyPartitions>
             <ModifyPartition wcm:action="add">
               <Order>1</Order>
@@ -345,7 +330,6 @@ def generate_workstation_unattend():
               <Format>NTFS</Format>
               <Label>System</Label>
             </ModifyPartition>
-
             <ModifyPartition wcm:action="add">
               <Order>2</Order>
               <PartitionID>2</PartitionID>
@@ -354,7 +338,6 @@ def generate_workstation_unattend():
               <Letter>C</Letter>
             </ModifyPartition>
           </ModifyPartitions>
-
         </Disk>
       </DiskConfiguration>
 
@@ -398,61 +381,50 @@ def generate_workstation_unattend():
 
 </unattend>
 """
-
     with open(WORKSTATION_UNATTEND, "w", encoding="utf-8") as f:
         f.write(xml)
 
+
 def generate_unattend_files():
-
     create_unattend_directory()
-
     print("Generating unattended install files")
-
     generate_router_unattend()
     generate_domain_controller_unattend()
     generate_workstation_unattend()
+
+
 # ------------------------------------------------
 # Virtual Switch
 # ------------------------------------------------
 
 def create_external_switch():
-
     print("Creating external internet switch")
 
     ps = """
-
-$extSwitch = "ACME-External"
-
-if (-not (Get-VMSwitch -Name $extSwitch -ErrorAction SilentlyContinue)) {
-
 $adapter = Get-NetAdapter |
-Where-Object {$_.Status -eq "Up"} |
+Where-Object {
+    $_.Status -eq "Up" -and
+    $_.InterfaceDescription -notmatch "Virtual|VMware|Hyper-V|VirtualBox|VPN|AnyConnect"
+} |
 Select-Object -First 1
-
-New-VMSwitch `
-  -Name $extSwitch `
-  -NetAdapterName $adapter.Name `
-  -AllowManagementOS $true
-
+if (-not $adapter) {
+    throw "No valid physical network adapter found for external switch."
 }
 """
-
     run_ps(ps)
 
-def configure_router_network():
 
+def configure_router_network():
     print("Adding second network adapter to router")
 
     ps = """
-
 $vm = "ACME-Router"
 $external = "ACME-External"
 
 Add-VMNetworkAdapter `
-  -VMName $vm `
-  -SwitchName $external `
-  -Name "ExternalAdapter"
-
+    -VMName $vm `
+    -SwitchName $external `
+    -Name "ExternalAdapter"
 """
     run_ps(ps)
 
@@ -466,12 +438,14 @@ def create_vm(name, memory_mb, vhd_size_gb, iso_path):
     vhd_path = os.path.join(vm_path, f"{name}.vhdx")
     os.makedirs(vm_path, exist_ok=True)
 
-    # Skip VM creation if OS is already installed
     if is_windows_installed(name):
         print(f"[INFO] Windows is already installed on {name}, skipping VM creation.")
         return
 
     print(f"Creating VM {name}")
+
+    # Determine the correct unattend XML filename for this VM
+    unattend_xml_name = f"{name.lower()}_autounattend.xml"
 
     ps = f"""
 $vmName = "{name}"
@@ -500,33 +474,31 @@ if (-not (Get-VM -Name $vmName -ErrorAction SilentlyContinue)) {{
     Set-VMFirmware `
         -VMName $vmName `
         -FirstBootDevice (Get-VMDvdDrive -VMName $vmName)
-# Create ISO with unattend (simple method using Windows ADK alternative later)
-$unattendPath = "{UNATTEND_DIR}\\{name.lower()}_autounattend.xml"
 
-if (Test-Path $unattendPath)
+    # Create ISO with unattend file using IMAPI COM object
+    $unattendPath = "{UNATTEND_DIR}\\{unattend_xml_name}"
 
-    $isoPath = "$vmPath\\autounattend.iso"
+    if (Test-Path $unattendPath) {{
+        $isoPath = "$vmPath\\autounattend.iso"
 
-    # Create ISO using IMAPI (native Windows COM)
-    $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
-    $fsi.FileSystemsToCreate = 1
-    $fsi.Root.AddFile("autounattend.xml", $unattendPath)
+        $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
+        $fsi.FileSystemsToCreate = 1
+        $fsi.Root.AddFile("autounattend.xml", $unattendPath)
 
-    $result = $fsi.CreateResultImage()
-    $stream = $result.ImageStream
+        $result = $fsi.CreateResultImage()
+        $stream = $result.ImageStream
 
-    $file = [System.IO.File]::Create($isoPath)
-    $buffer = New-Object byte[] 2048
+        $file = [System.IO.File]::Create($isoPath)
+        $buffer = New-Object byte[] 2048
 
-    while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) 
-        $file.Write($buffer, 0, $read)
-    
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {{
+            $file.Write($buffer, 0, $read)
+        }}
 
-    $file.Close()
+        $file.Close()
 
-    # Attach ISO to VM
-    Add-VMDvdDrive -VMName $vmName -Path $isoPath
-
+        Add-VMDvdDrive -VMName $vmName -Path $isoPath
+    }}
 }}
 """
     run_ps(ps)
@@ -537,49 +509,25 @@ if (Test-Path $unattendPath)
 # ------------------------------------------------
 
 def create_router_vm():
-
     print("Creating router VM")
-
-    create_vm(
-        ROUTER_VM,
-        memory_mb=2048,
-        vhd_size_gb=40,
-        iso_path=SERVER_ISO
-    )
+    create_vm(ROUTER_VM, memory_mb=2048, vhd_size_gb=40, iso_path=SERVER_ISO)
 
 
 def create_domain_controller_vm():
-
     print("Creating domain controller VM")
-
-    create_vm(
-        DC_VM,
-        memory_mb=4096,
-        vhd_size_gb=60,
-        iso_path=SERVER_ISO
-    )
+    create_vm(DC_VM, memory_mb=4096, vhd_size_gb=60, iso_path=SERVER_ISO)
 
 
 def create_workstation_vm():
-
     print("Creating workstation VM")
+    create_vm(WORKSTATION_VM, memory_mb=4096, vhd_size_gb=60, iso_path=WIN11_ISO)
 
-    create_vm(
-        WORKSTATION_VM,
-        memory_mb=4096,
-        vhd_size_gb=60,
-        iso_path=WIN11_ISO
-    )
 
 # ------------------------------------------------
 # Installation Detection
 # ------------------------------------------------
 
 def is_windows_installed(vm_name):
-    """
-    Reliable OS detection using VHD mount check
-    """
-
     ps = f"""
 $vm = Get-VM -Name "{vm_name}" -ErrorAction SilentlyContinue
 if ($vm -eq $null) {{ Write-Output "False"; exit }}
@@ -599,7 +547,6 @@ if ($drive -and (Test-Path "$($drive):\\Windows\\System32")) {{
 
 Dismount-VHD -Path $vhd -ErrorAction SilentlyContinue
 """
-
     result = run_ps(ps, return_output=True)
 
     if not result:
@@ -607,20 +554,11 @@ Dismount-VHD -Path $vhd -ErrorAction SilentlyContinue
 
     return result.strip().lower() == "true"
 
+
 import time
 
 
 def wait_for_vm_install(vm_name, timeout_minutes=60, poll_interval=20):
-    """
-    Waits until Windows is installed on a VM.
-
-    Features:
-    - Timeout protection
-    - Progress logging
-    - Safe failure handling
-    - Resumable behavior
-    """
-
     print(f"[WAIT] Waiting for Windows installation on {vm_name}...")
 
     start_time = time.time()
@@ -630,7 +568,6 @@ def wait_for_vm_install(vm_name, timeout_minutes=60, poll_interval=20):
     while True:
         elapsed = time.time() - start_time
 
-        # ⛔ TIMEOUT PROTECTION
         if elapsed > timeout_seconds:
             raise TimeoutError(
                 f"[FAIL] Timeout waiting for {vm_name} to finish installing Windows."
@@ -642,73 +579,50 @@ def wait_for_vm_install(vm_name, timeout_minutes=60, poll_interval=20):
             print(f"[WARN] Detection error for {vm_name}: {e}")
             installed = False
 
-        # 📊 STATE CHANGE LOGGING (only prints when something changes)
         if installed != last_state:
             state_str = "INSTALLED ✅" if installed else "INSTALLING ⏳"
             print(f"[STATUS] {vm_name}: {state_str}")
             last_state = installed
 
-        # ✅ EXIT CONDITION
         if installed:
             print(f"[DONE] {vm_name} installation detected.")
             return True
 
-        # 💤 WAIT BEFORE NEXT CHECK
         time.sleep(poll_interval)
+
 
 # ------------------------------------------------
 # Start VMs
 # ------------------------------------------------
-def wait_for_all_installs():
-    """
-    Waits for all VMs to complete OS installation.
-    """
 
+def wait_for_all_installs():
     wait_for_vm_install(ROUTER_VM)
     wait_for_vm_install(DC_VM)
     wait_for_vm_install(WORKSTATION_VM)
 
 
 def start_vm(vm_name):
-
     print(f"Starting VM {vm_name}")
-
-    ps = f"""
-Start-VM -Name "{vm_name}"
-"""
-
+    ps = f'Start-VM -Name "{vm_name}"'
     run_ps(ps)
+
 
 def start_router():
-
     print("Starting router VM")
+    run_ps('Start-VM -Name "ACME-Router"')
 
-    ps = """
-Start-VM -Name "ACME-Router"
-"""
-
-    run_ps(ps)
 
 def start_all_vms():
-
     start_router()
     start_vm(DC_VM)
     start_vm(WORKSTATION_VM)
+
 
 # ------------------------------------------------
 # PowerShell Direct (Run Commands Inside VM)
 # ------------------------------------------------
 
 def run_command_in_vm(vm_name, command, retries=10, delay=15):
-    """
-    Executes PowerShell inside a VM using PowerShell Direct.
-
-    Features:
-    - Retry logic
-    - Handles boot delays
-    - Prevents early execution failures
-    """
-
     print(f"[VM EXEC] {vm_name}")
 
     ps = f"""
@@ -719,7 +633,6 @@ Invoke-Command -VMName "{vm_name}" -Credential $cred -ScriptBlock {{
 {command}
 }}
 """
-
     for attempt in range(retries):
         try:
             run_ps(ps)
@@ -744,11 +657,10 @@ Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
 Import-Module ADDSDeployment
 
 Install-ADDSForest `
--DomainName "ad.acme.local" `
--SafeModeAdministratorPassword (ConvertTo-SecureString "Password123!" -AsPlainText -Force) `
--Force:$true
+    -DomainName "ad.acme.edu" `
+    -SafeModeAdministratorPassword (ConvertTo-SecureString "Password123!" -AsPlainText -Force) `
+    -Force:$true
 """
-
     run_command_in_vm(DC_VM, command)
 
 
@@ -763,17 +675,16 @@ def configure_dhcp():
 Install-WindowsFeature DHCP -IncludeManagementTools
 
 Add-DhcpServerv4Scope `
--Name "ACME Scope" `
--StartRange 192.168.4.100 `
--EndRange 192.168.4.200 `
--SubnetMask 255.255.255.0
+    -Name "ACME Scope" `
+    -StartRange 192.168.4.100 `
+    -EndRange 192.168.4.200 `
+    -SubnetMask 255.255.255.0
 
 Set-DhcpServerv4OptionValue `
--Router 192.168.4.1 `
--DnsServer 192.168.4.3 `
--DnsDomain "ad.acme.local"
+    -Router 192.168.4.1 `
+    -DnsServer 192.168.4.3 `
+    -DnsDomain "ad.acme.edu"
 """
-
     run_command_in_vm(DC_VM, command)
 
 
@@ -787,18 +698,17 @@ def configure_active_directory_structure():
     command = """
 Import-Module ActiveDirectory
 
-New-ADOrganizationalUnit -Name "CorporateOffice" -Path "DC=ad,DC=acme,DC=local"
-New-ADOrganizationalUnit -Name "Users" -Path "OU=CorporateOffice,DC=ad,DC=acme,DC=local"
-New-ADOrganizationalUnit -Name "Computers" -Path "OU=CorporateOffice,DC=ad,DC=acme,DC=local"
+New-ADOrganizationalUnit -Name "CorporateOffice" -Path "DC=ad,DC=acme,DC=edu"
+New-ADOrganizationalUnit -Name "Users" -Path "OU=CorporateOffice,DC=ad,DC=acme,DC=edu"
+New-ADOrganizationalUnit -Name "Computers" -Path "OU=CorporateOffice,DC=ad,DC=acme,DC=edu"
 
 New-ADUser `
--Name "SecTest" `
--SamAccountName "SecTest" `
--AccountPassword (ConvertTo-SecureString "Password123!" -AsPlainText -Force) `
--Enabled $true `
--Path "OU=Users,OU=CorporateOffice,DC=ad,DC=acme,DC=local"
+    -Name "SecTest" `
+    -SamAccountName "SecTest" `
+    -AccountPassword (ConvertTo-SecureString "Password123!" -AsPlainText -Force) `
+    -Enabled $true `
+    -Path "OU=Users,OU=CorporateOffice,DC=ad,DC=acme,DC=edu"
 """
-
     run_command_in_vm(DC_VM, command)
 
 
@@ -815,7 +725,6 @@ New-Item -Path "C:\\Shares\\Users$" -ItemType Directory -Force
 
 New-SmbShare -Name "Users$" -Path "C:\\Shares\\Users$" -FullAccess "Everyone"
 """
-
     run_command_in_vm(DC_VM, command)
 
 
@@ -832,13 +741,14 @@ $cred = New-Object System.Management.Automation.PSCredential ("ad\\Administrator
 
 Add-Computer -DomainName "ad.acme.edu" -Credential $cred -Force -Restart
 """
-
     run_command_in_vm(WORKSTATION_VM, command)
-
     wait_for_vm_install(WORKSTATION_VM)
+
+
 # ------------------------------------------------
 # FULL POST-INSTALL PIPELINE
 # ------------------------------------------------
+
 def verify_environment():
     print("[VERIFY] Running full validation...")
 
@@ -853,22 +763,17 @@ def verify_environment():
         try:
             run_command_in_vm(DC_VM, cmd)
             print(f"[PASS] {name}")
-        except:
+        except Exception:
             raise Exception(f"[FAIL] {name}")
-        
+
+
 def configure_full_environment():
     run_step("ad_install", install_active_directory)
-
     run_step("wait_dc", lambda: wait_for_vm_install(DC_VM))
-
     run_step("dhcp", configure_dhcp)
-
     run_step("ad_structure", configure_active_directory_structure)
-
     run_step("shares", configure_file_shares)
-
     run_step("join_domain", join_workstation_to_domain)
-
     run_step("verify", verify_environment)
 
     print("[SUCCESS] Full domain environment configured.")

@@ -29,7 +29,6 @@ def is_ad_installed():
 $feature = Get-WindowsFeature AD-Domain-Services
 if ($feature.Installed) { "True" } else { "False" }
 """
-
     result = run_on_dc(ps)
 
     if not result:
@@ -50,9 +49,7 @@ def wait_for_dc_ready(timeout=600):
 
     while time.time() - start < timeout:
         try:
-            ps = "hostname"
-            result = run_on_dc(ps)
-
+            result = run_on_dc("hostname")
             if result:
                 print("[AD] DC is reachable.")
                 return True
@@ -76,7 +73,6 @@ def verify_ad():
 Import-Module ActiveDirectory
 (Get-ADDomain).Name
 """
-
     result = run_on_dc(ps)
 
     if not result:
@@ -92,18 +88,17 @@ Import-Module ActiveDirectory
 def install_active_directory():
     config = get_domain_config()
 
-    domain_name = config.get("domain_name", "ad.acme.edu")
-    netbios = config.get("netbios_name", "ACME")
-    safe_mode_pass = config.get("safe_mode_password", "Password123!")
+    # config_loader returns keys "name" and "netbios"
+    domain_name = config.get("name", "ad.acme.edu")
+    netbios = config.get("netbios", "ACME")
+    safe_mode_pass = "Password123!"
 
     print(f"\n[AD] Installing Active Directory: {domain_name}\n")
 
-    # --- Skip if already installed ---
     if is_ad_installed():
         print("[AD] Active Directory already installed. Skipping.")
         return
 
-    # --- Install AD DS Role ---
     print("[AD] Installing AD DS role...")
 
     ps_install = """
@@ -111,7 +106,6 @@ Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
 """
     run_on_dc(ps_install)
 
-    # --- Promote to Domain Controller ---
     print("[AD] Promoting to Domain Controller...")
 
     ps_promote = f"""
@@ -129,13 +123,9 @@ Install-ADDSForest `
 
 Restart-Computer -Force
 """
-
     run_on_dc(ps_promote)
 
-    # --- Wait for reboot ---
     wait_for_dc_ready()
-
-    # --- Verify AD ---
     verify_ad()
 
     print("\n[AD] Active Directory installation COMPLETE.\n")

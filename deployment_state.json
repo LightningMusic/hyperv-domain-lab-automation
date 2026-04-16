@@ -1,0 +1,9 @@
+{
+    "completed": [
+        "Verify Hyper-V",
+        "Verify ISOs",
+        "Create Lab Directory",
+        "Generate Unattend Files",
+        "Create Switch"
+    ]
+}

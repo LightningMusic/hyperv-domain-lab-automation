@@ -46,18 +46,17 @@ def destroy_lab():
 
 
 # ------------------------------------------------
-# Build (Checkpoint Driven)
+# Build (Orchestrator Driven)
 # ------------------------------------------------
-
-
 
 tracker = ProgressTracker()
 orch = Orchestrator()
 
 
 # -------------------------
-# Define Steps
+# Define Steps (no duplicates)
 # -------------------------
+
 orch.add_step(Step(
     "Verify Hyper-V",
     action=verify_hyperv_installed,
@@ -107,6 +106,12 @@ orch.add_step(Step(
 ))
 
 orch.add_step(Step(
+    "Configure Router Network",
+    action=configure_router_network,
+    validate=lambda: True
+))
+
+orch.add_step(Step(
     "Start VMs",
     action=start_all_vms,
     validate=lambda: True
@@ -121,13 +126,25 @@ orch.add_step(Step(
 orch.add_step(Step(
     "Install Active Directory",
     action=install_active_directory,
-    validate=lambda: domain_exists("ad.acme.local")
+    validate=lambda: domain_exists("ad.acme.edu")
 ))
 
 orch.add_step(Step(
     "Configure DHCP",
     action=configure_dhcp,
     validate=dhcp_configured
+))
+
+orch.add_step(Step(
+    "Create Organizational Units",
+    action=create_organizational_units,
+    validate=lambda: True
+))
+
+orch.add_step(Step(
+    "Create Users and Groups",
+    action=create_users_and_groups,
+    validate=lambda: True
 ))
 
 orch.add_step(Step(
@@ -138,36 +155,6 @@ orch.add_step(Step(
 
 orch.add_step(Step(
     "Verify GPO",
-    action=lambda: None,
-    validate=lambda: gpo_applied("ACME-WKS01")
-))
-
-orch.add_step(Step(
-    "Create VMs",
-    action=create_workstation_vm,
-    validate=lambda: vm_exists("ACME-WKS01")
-))
-
-orch.add_step(Step(
-    "Install Active Directory",
-    action=install_active_directory,
-    validate=lambda: domain_exists("ad.acme.local")
-))
-
-orch.add_step(Step(
-    "Configure DHCP",
-    action=configure_dhcp,
-    validate=dhcp_configured
-))
-
-orch.add_step(Step(
-    "Join Domain",
-    action=join_workstation_to_domain,
-    validate=lambda: is_domain_joined("ACME-WKS01")
-))
-
-orch.add_step(Step(
-    "Apply GPO",
     action=lambda: None,
     validate=lambda: gpo_applied("ACME-WKS01")
 ))
@@ -191,7 +178,6 @@ def rebuild_lab():
 # ------------------------------------------------
 # Status
 # ------------------------------------------------
-
 
 def show_status():
     print("\n[STATUS] ACME Lab VMs\n")
