@@ -39,9 +39,14 @@ def safe_output(result):
 # ------------------------------------------------
 
 def vm_exists(vm_name):
-    result = run_ps(f'Get-VM -Name "{vm_name}"', return_output=True)
-    output = safe_output(result)
-    return vm_name.lower() in output
+    try:
+        result = run_ps(
+            f'Get-VM -Name "{vm_name}" -ErrorAction SilentlyContinue',
+            return_output=True
+        )
+        return bool(result and vm_name.lower() in result.lower())
+    except Exception:
+        return False
 
 
 # ------------------------------------------------

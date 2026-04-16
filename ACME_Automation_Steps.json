@@ -8,7 +8,11 @@
       "dns_primary": "192.168.4.3"
     }
   },
-
+"install_media": {
+  "server_iso": "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
+  "windows_iso": "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Windows_11_Eval.iso",
+  "Ubuntu_server_iso": "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Ubuntu-24.04.4-live-server-amd64.iso"
+},
   "hyperv": {
     "switches": [
       {
