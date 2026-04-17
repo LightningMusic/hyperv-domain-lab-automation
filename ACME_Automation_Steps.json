@@ -1,69 +1,68 @@
 {
+  "paths": {
+    "lab_root":    "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\LabVMs",
+    "unattend_dir":"C:\\CVNP-Python\\Python Projects\\Lab Deployment\\temp_unattend",
+    "log_dir":     "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\logs"
+  },
+
+  "install_media": {
+    "server_iso":       "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
+    "windows_iso":      "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Windows_11_Eval.iso",
+    "Ubuntu_server_iso":"C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Ubuntu-24.04.4-live-server-amd64.iso"
+  },
+
   "environment": {
-    "domain_name": "ad.acme.edu",
-    "netbios_name": "ACME",
+    "domain_name":        "ad.acme.edu",
+    "netbios_name":       "ACME",
+    "admin_password":     "Password123!",
+    "safe_mode_password": "Password123!",
     "network": {
-      "subnet": "192.168.4.0/24",
-      "gateway": "192.168.4.1",
+      "subnet":      "192.168.4.0/24",
+      "gateway":     "192.168.4.1",
       "dns_primary": "192.168.4.3"
     }
   },
-"install_media": {
-  "server_iso": "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
-  "windows_iso": "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Windows_11_Eval.iso",
-  "Ubuntu_server_iso": "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Ubuntu-24.04.4-live-server-amd64.iso"
-},
+
   "hyperv": {
+    "internal_switch": "AcmeBusiness",
+    "external_switch": "ACME-External",
     "switches": [
-      {
-        "name": "AcmeBusiness",
-        "type": "Internal"
-      }
+      { "name": "AcmeBusiness", "type": "Internal" }
     ]
   },
 
   "virtual_machines": [
     {
-      "name": "AcmeRtr01",
-      "role": "router",
-      "generation": 2,
-      "cpu": 1,
-      "ram_gb": 1,
-      "disk_gb": 10,
-      "network": "AcmeBusiness",
-      "ip": "192.168.4.1"
+      "name": "AcmeRtr01", "role": "router",
+      "generation": 2, "cpu": 1, "ram_gb": 1, "disk_gb": 10,
+      "network": "AcmeBusiness", "ip": "192.168.4.1"
     },
-
     {
-      "name": "AcmePDC01",
-      "role": "domain_controller",
-      "generation": 2,
-      "cpu": 2,
-      "ram_gb": 4,
-      "disk_gb": 120,
-      "additional_disks_gb": [60,60],
-      "network": "AcmeBusiness",
-      "ip": "192.168.4.3",
-      "gateway": "192.168.4.1"
+      "name": "AcmePDC01", "role": "domain_controller",
+      "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 120,
+      "additional_disks_gb": [60, 60],
+      "network": "AcmeBusiness", "ip": "192.168.4.3", "gateway": "192.168.4.1"
     },
-
     {
-      "name": "AcmeWks1001",
-      "role": "workstation",
-      "generation": 2,
-      "cpu": 1,
-      "ram_gb": 2,
-      "disk_gb": 60,
-      "network": "AcmeBusiness",
-      "ip": "192.168.4.100"
+      "name": "AcmeWks1001", "role": "workstation",
+      "generation": 2, "cpu": 1, "ram_gb": 2, "disk_gb": 60,
+      "network": "AcmeBusiness", "ip": "192.168.4.100"
+    },
+    {
+      "name": "AcmePDC02", "role": "storage",
+      "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 60,
+      "additional_disks_gb": [30, 30, 30, 30, 30, 50],
+      "network": "AcmeBusiness", "ip": "192.168.4.4"
+    },
+    {
+      "name": "AcmeWeb01", "role": "web",
+      "generation": 1, "cpu": 2, "ram_gb": 2, "disk_gb": 40,
+      "network": "AcmeBusiness", "ip": "192.168.4.45"
     }
   ],
 
   "server_roles": [
-    "AD-Domain-Services",
-    "DNS",
-    "DHCP",
-    "Print-Services"
+    "AD-Domain-Services", "DNS", "DHCP", "Print-Services"
   ],
 
   "active_directory": {
@@ -74,134 +73,67 @@
       "CorporateOffice/Users/SecTest",
       "CorporateOffice/Computers"
     ],
-
     "users": [
       {
-        "username": "SecTest",
-        "firstname": "Sec",
-        "lastname": "Testing",
-        "password": "Password01",
-        "ou": "CorporateOffice/Users"
+        "username": "SecTest", "firstname": "Sec", "lastname": "Testing",
+        "password": "Password01", "ou": "CorporateOffice/Users"
       },
-
       {
-        "username": "CorpUser",
-        "firstname": "CorpUser",
-        "lastname": "Template",
-        "password": "Password01",
-        "disabled": true,
-        "password_never_expires": true,
-        "ou": "CorporateOffice/Users"
+        "username": "CorpUser", "firstname": "CorpUser", "lastname": "Template",
+        "password": "Password01", "disabled": true,
+        "password_never_expires": true, "ou": "CorporateOffice/Users"
       }
     ]
   },
 
   "shared_folders": [
-    {
-      "name": "Users$",
-      "path": "E:\\Users$",
-      "share_permissions": "Everyone:FullControl"
-    },
-
-    {
-      "name": "PUB",
-      "path": "E:\\PUB",
-      "share_permissions": "Everyone:Read"
-    },
-
-    {
-      "name": "APPS",
-      "path": "E:\\APPS",
-      "share_permissions": "Everyone:FullControl"
-    }
+    { "name": "Users$", "path": "E:\\Users$",  "share_permissions": "Everyone:FullControl" },
+    { "name": "PUB",    "path": "E:\\PUB",     "share_permissions": "Everyone:Read" },
+    { "name": "APPS",   "path": "E:\\APPS",    "share_permissions": "Everyone:FullControl" }
   ],
 
   "home_directories": [
-    {
-      "user": "SecTest",
-      "drive_letter": "H",
-      "path": "\\\\AcmePDC01\\Users$\\SecTest"
-    }
+    { "user": "SecTest", "drive_letter": "H", "path": "\\\\AcmePDC01\\Users$\\SecTest" }
   ],
 
   "dhcp": {
     "scope_name": "AcmeBusiness",
-    "start_ip": "192.168.4.100",
-    "end_ip": "192.168.4.249",
+    "start_ip": "192.168.4.100", "end_ip": "192.168.4.249",
     "subnet_mask": "255.255.255.0",
-    "exclusions": [
-      "192.168.4.1-192.168.4.49",
-      "192.168.4.251-192.168.4.254"
-    ],
-    "router": "192.168.4.1",
-    "dns_server": "192.168.4.3",
-    "dns_domain": "ad.acme.edu"
+    "exclusions": ["192.168.4.1-192.168.4.49", "192.168.4.251-192.168.4.254"],
+    "router": "192.168.4.1", "dns_server": "192.168.4.3", "dns_domain": "ad.acme.edu"
   },
 
   "gpo": {
-
     "domain_security": {
-      "password_policy": {
-        "minimum_length": 10,
-        "maximum_age_days": 180
-      },
-
-      "account_lockout": {
-        "threshold": 10,
-        "duration_minutes": 40,
-        "reset_minutes": 30
-      },
-
-      "kerberos": {
-        "service_ticket_minutes": 540,
-        "user_ticket_hours": 12
-      }
+      "password_policy":  { "minimum_length": 10, "maximum_age_days": 180 },
+      "account_lockout":  { "threshold": 10, "duration_minutes": 40, "reset_minutes": 30 },
+      "kerberos":         { "service_ticket_minutes": 540, "user_ticket_hours": 12 }
     },
-
     "audit_policy": [
-      "AuditDirectoryServiceAccess",
-      "AuditObjectAccess",
-      "AuditLogonEvents"
+      "AuditDirectoryServiceAccess", "AuditObjectAccess", "AuditLogonEvents"
     ],
-
     "interactive_logon": {
       "hide_last_user": true,
-      "banner_title": "Warning: Unauthorized Use is Prohibited",
+      "banner_title":   "Warning: Unauthorized Use is Prohibited",
       "banner_message": "Unauthorized use will be prosecuted to the fullest extent of the law."
     },
-
     "inactivity_timeout_seconds": 600,
-
-    "rename_accounts": {
-      "administrator": "Dumbledore",
-      "guest": "WileECoyote"
-    },
-
+    "rename_accounts": { "administrator": "Dumbledore", "guest": "WileECoyote" },
     "desktop_background": {
-      "path": "\\\\AcmePDC01\\SYSVOL\\BackgroundLogos\\AcmeEduLogo3.bmp",
-      "style": "Fill"
+      "path": "\\\\AcmePDC01\\SYSVOL\\BackgroundLogos\\AcmeEduLogo3.bmp", "style": "Fill"
     },
-
     "drive_mappings": [
-      {
-        "drive_letter": "I",
-        "path": "\\\\AcmePDC01\\PUB"
-      }
+      { "drive_letter": "I", "path": "\\\\AcmePDC01\\PUB" }
     ]
   },
 
   "domain_join": {
-    "workstations": [
-      "AcmeWks1001"
-    ],
-    "target_ou": "CorporateOffice/Computers"
+    "workstations": ["AcmeWks1001"],
+    "target_ou":    "CorporateOffice/Computers"
   },
 
-  "remote_desktop": {
-    "enable": true
-  },
+  "remote_desktop": { "enable": true },
 
-  "logging": {
-    "log_file": "acme_deployment.log"
-  }
+  "logging": { "log_file": "acme_deployment.log" }
 }
