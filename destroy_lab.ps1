@@ -1,6 +1,13 @@
-# ACME Lab Destroy Script — stops and removes ALL lab VMs and resources
+# destroy_lab.ps1 — ACME Lab full teardown
+# Works regardless of CWD because all paths are derived from this script's location.
 
-Write-Host "Starting ACME Lab cleanup..." -ForegroundColor Yellow
+param(
+    [switch]$Force   # skip confirmation prompt when $true
+)
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$LabPath   = Join-Path $ScriptDir "LabVMs"
+$StateFile = Join-Path $ScriptDir "logs\deployment_state.json"
 
 $vmNames = @(
     "AcmeRtr01",
@@ -10,43 +17,88 @@ $vmNames = @(
     "AcmeWeb01"
 )
 
-$labPath = "C:\CVNP-Python\Python Projects\Lab Deployment\LabVMs"
+$switchNames = @("AcmeBusiness", "ACME-External")
 
-# Stop VMs
-foreach ($vm in $vmNames) {
-    if (Get-VM -Name $vm -ErrorAction SilentlyContinue) {
-        Write-Host "Stopping $vm" -ForegroundColor Cyan
-        Stop-VM -Name $vm -Force -TurnOff -ErrorAction SilentlyContinue
+# ── Confirmation ──────────────────────────────────────────────────────────────
+if (-not $Force) {
+    $reply = Read-Host "This will DELETE all ACME lab VMs and data. Continue? [y/N]"
+    if ($reply -notmatch '^[Yy]') {
+        Write-Host "Aborted." -ForegroundColor Yellow
+        exit 0
     }
 }
 
-# Remove VMs (VHDs auto-deleted with -Force on newer PS)
+Write-Host "`nStarting ACME Lab cleanup..." -ForegroundColor Yellow
+
+# ── Ensure vmms is running so Hyper-V cmdlets work ───────────────────────────
+$svc = Get-Service vmms -ErrorAction SilentlyContinue
+if ($svc -and $svc.Status -ne 'Running') {
+    Write-Host "Starting vmms..." -ForegroundColor Cyan
+    Start-Service vmms
+    Start-Sleep 5
+}
+
+# ── Stop VMs ──────────────────────────────────────────────────────────────────
 foreach ($vm in $vmNames) {
-    if (Get-VM -Name $vm -ErrorAction SilentlyContinue) {
+    $obj = Get-VM -Name $vm -ErrorAction SilentlyContinue
+    if ($obj) {
+        if ($obj.State -ne 'Off') {
+            Write-Host "Stopping $vm..." -ForegroundColor Cyan
+            Stop-VM -Name $vm -Force -TurnOff -ErrorAction SilentlyContinue
+            # Wait up to 30s for the VM to reach Off state
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Get-VM -Name $vm).State -ne 'Off' -and (Get-Date) -lt $deadline) {
+                Start-Sleep 2
+            }
+        }
+    }
+}
+
+# ── Remove VMs ────────────────────────────────────────────────────────────────
+foreach ($vm in $vmNames) {
+    $obj = Get-VM -Name $vm -ErrorAction SilentlyContinue
+    if ($obj) {
         Write-Host "Removing $vm" -ForegroundColor Cyan
-        Remove-VM -Name $vm -Force
+        # Collect VHD paths before removing the VM record
+        $vhds = Get-VMHardDiskDrive -VMName $vm -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Path
+        Remove-VM -Name $vm -Force -ErrorAction SilentlyContinue
+        # Remove any VHDs that weren't automatically deleted
+        foreach ($vhd in $vhds) {
+            if ($vhd -and (Test-Path $vhd)) {
+                Remove-Item $vhd -Force -ErrorAction SilentlyContinue
+                Write-Host "  Deleted VHD: $vhd" -ForegroundColor DarkGray
+            }
+        }
     }
 }
 
-# Remove virtual switches
-foreach ($sw in @("AcmeBusiness", "ACME-External")) {
-    if (Get-VMSwitch -Name $sw -ErrorAction SilentlyContinue) {
+# ── Remove virtual switches ───────────────────────────────────────────────────
+foreach ($sw in $switchNames) {
+    $obj = Get-VMSwitch -Name $sw -ErrorAction SilentlyContinue
+    if ($obj) {
         Write-Host "Removing switch: $sw" -ForegroundColor Cyan
-        Remove-VMSwitch -Name $sw -Force
+        Remove-VMSwitch -Name $sw -Force -ErrorAction SilentlyContinue
     }
 }
 
-# Delete all VM files
-if (Test-Path $labPath) {
-    Write-Host "Deleting LabVMs folder: $labPath" -ForegroundColor Cyan
-    Remove-Item $labPath -Recurse -Force
+# ── Delete LabVMs folder ──────────────────────────────────────────────────────
+if (Test-Path $LabPath) {
+    Write-Host "Deleting LabVMs folder: $LabPath" -ForegroundColor Cyan
+    Remove-Item $LabPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# Clear deployment state
-$stateFile = "C:\CVNP-Python\Python Projects\Lab Deployment\logs\deployment_state.json"
-if (Test-Path $stateFile) {
-    Remove-Item $stateFile -Force
+# ── Clear deployment state ────────────────────────────────────────────────────
+if (Test-Path $StateFile) {
+    Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
     Write-Host "Cleared deployment state." -ForegroundColor Cyan
 }
 
-Write-Host "`nACME Lab fully removed." -ForegroundColor Green
+# ── Clean up temp_unattend ISO files (keep XMLs) ─────────────────────────────
+$unattendDir = Join-Path $ScriptDir "temp_unattend"
+if (Test-Path $unattendDir) {
+    Get-ChildItem $unattendDir -Filter "*.iso" | Remove-Item -Force -ErrorAction SilentlyContinue
+    Write-Host "Cleaned temp_unattend ISO files." -ForegroundColor DarkGray
+}
+
+Write-Host "`nACME Lab fully removed.`n" -ForegroundColor Green
