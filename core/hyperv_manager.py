@@ -59,29 +59,102 @@ def run_step(step, func):
     _save_cp(step)
 
 
-# ── vmms health guard ────────────────────────────────────────────────────────
+# ── Hyper-V WMI provider reset ───────────────────────────────────────────────
+
+def _reset_hyperv_wmi():
+    """
+    Hard-reset the Hyper-V WMI provider host.
+
+    The symptom "ObjectNotFound" on ANY Hyper-V cmdlet (New-VMSwitch,
+    New-VHD, New-VM …) even when vmms reports Running means that the
+    WMI provider host process (WmiPrvSE.exe) that serves the Hyper-V
+    namespace has crashed or has a stale handle.
+
+    Restarting vmms alone is not enough because Windows does not force-
+    kill WmiPrvSE — it just stops accepting new connections.  We have to:
+      1. Kill all WmiPrvSE.exe processes so the WMI service spawns fresh ones
+      2. Restart vmms (which re-registers its WMI provider on startup)
+      3. Restart the WMI service itself (winmgmt) to flush any cached handles
+      4. Wait for everything to stabilise and verify with a harmless read
+    """
+    log.info("[WMI] Resetting Hyper-V WMI provider chain...")
+    run_ps("""
+# Step 1 — kill stale WMI provider host processes
+$procs = Get-Process -Name WmiPrvSE -ErrorAction SilentlyContinue
+if ($procs) {
+    $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+    Write-Output "Killed $($procs.Count) WmiPrvSE process(es)"
+    Start-Sleep 3
+} else {
+    Write-Output "No WmiPrvSE processes to kill"
+}
+
+# Step 2 — stop vmms cleanly before winmgmt restart
+Stop-Service vmms -Force -ErrorAction SilentlyContinue
+Start-Sleep 2
+
+# Step 3 — restart WMI service to flush provider registrations
+Restart-Service winmgmt -Force
+Start-Sleep 5
+
+# Step 4 — restart vmms so it re-registers its WMI provider
+Start-Service vmms
+$deadline = (Get-Date).AddSeconds(45)
+while ((Get-Service vmms).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
+    Start-Sleep 2
+}
+$status = (Get-Service vmms).Status
+Write-Output "vmms after reset: $status"
+if ($status -ne 'Running') { throw "vmms failed to restart after WMI reset" }
+Start-Sleep 5   # give the provider time to fully register
+
+# Step 5 — verify the WMI handle works with a harmless read
+try {
+    $null = Get-VMSwitch -ErrorAction Stop
+    Write-Output "WMI probe: OK (Get-VMSwitch succeeded)"
+} catch {
+    Write-Output "WMI probe warning: $($_.Exception.Message)"
+}
+""")
+    log.info("[WMI] Hyper-V WMI provider reset complete")
+
 
 def ensure_vmms_running():
     """
-    Ensure the Hyper-V Virtual Machine Management service is running.
-    If it crashed or is stopped, restart it before issuing any Hyper-V cmdlets.
-    Called at the top of every Hyper-V operation block.
+    Verify vmms is Running.  If it is not, or if the WMI provider is
+    broken (ObjectNotFound on a read), perform a full WMI reset.
     """
-    run_ps("""
+    probe = run_ps("""
 $svc = Get-Service -Name vmms -ErrorAction SilentlyContinue
-if (-not $svc) { Write-Output "vmms service not found - Hyper-V may not be installed"; exit }
-if ($svc.Status -ne 'Running') {
-    Write-Output "vmms not running ($($svc.Status)) — restarting..."
-    Start-Service vmms
-    $deadline = (Get-Date).AddSeconds(30)
-    while ((Get-Service vmms).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
-        Start-Sleep 2
-    }
+if (-not $svc) { "NOT_INSTALLED"; exit }
+if ($svc.Status -ne 'Running') { "NOT_RUNNING"; exit }
+# Probe the WMI provider — if this throws ObjectNotFound the handle is broken
+try {
+    $null = Get-VMSwitch -ErrorAction Stop
+    "OK"
+} catch [Microsoft.HyperV.PowerShell.VirtualizationException] {
+    "WMI_BROKEN"
+} catch {
+    "OK"   # other errors (e.g. no switches yet) are fine
 }
-$status = (Get-Service vmms).Status
-Write-Output "vmms: $status"
-if ($status -ne 'Running') { throw "vmms failed to start" }
-""")
+""", return_output=True) or ""
+
+    probe = probe.strip()
+    log.debug(f"[WMI] vmms probe: {probe}")
+
+    if probe == "NOT_INSTALLED":
+        raise RuntimeError(
+            "Hyper-V (vmms) is not installed. "
+            "Enable Hyper-V via: Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All"
+        )
+
+    if probe in ("NOT_RUNNING", "WMI_BROKEN"):
+        reason = "service stopped" if probe == "NOT_RUNNING" else "WMI provider broken (ObjectNotFound)"
+        log.warning(f"[WMI] vmms problem detected: {reason} — performing full reset")
+        _reset_hyperv_wmi()
+    else:
+        log.debug("[WMI] vmms OK")
+
 
 
 # ── Validation ──────────────────────────────────────────────────────────────
@@ -352,41 +425,59 @@ if (-not (Test-Path $xmlSrc)) {{
 
 # ── Switches ────────────────────────────────────────────────────────────────
 
-def _adapter_is_wifi(adapter_name: str) -> bool:
-    """Return True if the adapter is a Wi-Fi / wireless interface."""
-    r = run_ps(
-        f'(Get-NetAdapter -Name "{adapter_name}" -ErrorAction SilentlyContinue).PhysicalMediaType',
-        return_output=True
-    ) or ""
-    # PhysicalMediaType 9 = Native 802.11 (Wi-Fi)
-    wifi_indicators = ["802.11", "wireless", "wi-fi", "wifi", "native 802"]
-    return any(x in r.lower() for x in wifi_indicators) or r.strip() == "9"
+def _create_switch_with_reset(ps_command: str, switch_name: str, max_attempts: int = 3):
+    """
+    Execute a New-VMSwitch command.  If it throws ObjectNotFound (broken WMI
+    handle), do a full WMI reset and retry up to max_attempts times.
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            run_ps(ps_command)
+            return  # success
+        except RuntimeError as e:
+            err = str(e)
+            if "ObjectNotFound" in err or "VirtualizationException" in err:
+                log.warning(
+                    f"[SWITCH] New-VMSwitch '{switch_name}' attempt {attempt}/{max_attempts} "
+                    f"failed with WMI ObjectNotFound — resetting WMI provider..."
+                )
+                if attempt < max_attempts:
+                    _reset_hyperv_wmi()
+                    # Confirm the switch didn't actually get created despite the error
+                    already = run_ps(
+                        f'if (Get-VMSwitch -Name "{switch_name}" -ErrorAction SilentlyContinue) {{ "yes" }} else {{ "no" }}',
+                        return_output=True
+                    ) or ""
+                    if "yes" in already:
+                        log.info(f"[SWITCH] '{switch_name}' exists after WMI error — treating as success")
+                        return
+                else:
+                    raise RuntimeError(
+                        f"[SWITCH] Failed to create '{switch_name}' after {max_attempts} attempts.\n"
+                        f"Root cause: Hyper-V WMI provider ObjectNotFound.\n"
+                        f"This is a Windows/Hyper-V bug. Try rebooting the host and running again.\n"
+                        f"Original error: {err}"
+                    )
+            else:
+                raise   # non-WMI error, propagate immediately
 
 
 def create_external_switch():
     """
-    Create the lab virtual switches.
+    Create lab virtual switches with automatic WMI recovery.
 
-    Strategy (Wi-Fi safe):
-    ──────────────────────
-    Creating an External Hyper-V switch bound to a Wi-Fi adapter is a
-    well-known Windows bug: vmms corrupts its own WMI namespace handle
-    during the operation, making ALL subsequent Hyper-V cmdlets throw
-    ObjectNotFound for the rest of that service lifetime — even after
-    Restart-Service vmms.
+    Architecture:
+    - AcmeBusiness (Internal) — all VM traffic, always created first
+    - Host NetNat — provides internet to VMs via the host's connection
+    - ACME-External (External on wired only) — optional, skipped on Wi-Fi
 
-    Solution: always create ONLY an Internal switch for lab traffic, then
-    configure Windows NAT (NetNat) on the HOST for internet access.
-    This avoids the Wi-Fi binding entirely and is actually better lab
-    architecture (isolated network, no bridge to host Wi-Fi).
-
-    If a genuine wired (Ethernet) adapter is available we DO create the
-    External switch as well, because wired adapters don't trigger the bug.
+    The Internal + NetNat approach is used because binding an External
+    switch to Wi-Fi reliably corrupts vmms's WMI provider on Windows.
     """
     ensure_vmms_running()
     ext = get_external_switch()
 
-    # ── 1. Internal switch (always needed, always safe) ───────────────────────
+    # ── 1. Internal switch ────────────────────────────────────────────────────
     existing_int = run_ps(
         f'if (Get-VMSwitch -Name "{SWITCH_NAME}" -ErrorAction SilentlyContinue) {{ "exists" }} else {{ "missing" }}',
         return_output=True
@@ -394,45 +485,45 @@ def create_external_switch():
 
     if "missing" in existing_int:
         log.info(f"[SWITCH] Creating internal switch: {SWITCH_NAME}")
-        run_ps(
+        _create_switch_with_reset(
             f'New-VMSwitch -Name "{SWITCH_NAME}" -SwitchType Internal -ErrorAction Stop; '
-            f'Write-Output "Internal switch created: {SWITCH_NAME}"'
+            f'Write-Output "Internal switch created: {SWITCH_NAME}"',
+            SWITCH_NAME
         )
-        # Internal-only switches rarely destabilise vmms, but wait briefly anyway
+        log.info(f"[SWITCH] ✅ Internal switch ready: {SWITCH_NAME}")
         time.sleep(3)
         ensure_vmms_running()
     else:
         log.info(f"[SWITCH] Internal switch exists: {SWITCH_NAME}")
 
-    # ── 2. Host NAT for outbound internet (replaces External switch on Wi-Fi) ──
-    nat_name = "AcmeLabNAT"
+    # ── 2. Host NAT for internet access ───────────────────────────────────────
+    nat_name   = "AcmeLabNAT"
     nat_prefix = "192.168.4.0/24"
-    gw_ip = "192.168.4.254"   # host-side gateway IP on the internal switch
+    gw_ip      = "192.168.4.254"
 
     run_ps(f"""
-# Assign the host IP on the internal switch adapter (if not already set)
 $ifAlias = (Get-NetAdapter | Where-Object {{ $_.Name -like "*{SWITCH_NAME}*" }}).Name
 if ($ifAlias) {{
     $existing = Get-NetIPAddress -InterfaceAlias $ifAlias -IPAddress "{gw_ip}" -ErrorAction SilentlyContinue
     if (-not $existing) {{
         New-NetIPAddress -InterfaceAlias $ifAlias -IPAddress "{gw_ip}" -PrefixLength 24 -ErrorAction SilentlyContinue
-        Write-Output "Host gateway IP set: {gw_ip}"
+        Write-Output "Host gateway IP set: {gw_ip} on $ifAlias"
     }} else {{
         Write-Output "Host gateway IP already set: {gw_ip}"
     }}
+}} else {{
+    Write-Output "Warning: could not find adapter for switch {SWITCH_NAME}"
 }}
-
-# Create NAT rule if missing
 if (-not (Get-NetNat -Name "{nat_name}" -ErrorAction SilentlyContinue)) {{
     New-NetNat -Name "{nat_name}" -InternalIPInterfaceAddressPrefix "{nat_prefix}"
-    Write-Output "NAT created: {nat_name} → {nat_prefix}"
+    Write-Output "NAT created: {nat_name} ({nat_prefix})"
 }} else {{
     Write-Output "NAT exists: {nat_name}"
 }}
 """)
-    log.info(f"[SWITCH] Host NAT configured ({nat_prefix})")
+    log.info(f"[SWITCH] ✅ Host NAT ready ({nat_prefix} → host internet)")
 
-    # ── 3. External switch — ONLY if a wired Ethernet adapter exists ──────────
+    # ── 3. External switch on wired Ethernet only (optional) ─────────────────
     existing_ext = run_ps(
         f'if (Get-VMSwitch -Name "{ext}" -ErrorAction SilentlyContinue) {{ "exists" }} else {{ "missing" }}',
         return_output=True
@@ -442,7 +533,6 @@ if (-not (Get-NetNat -Name "{nat_name}" -ErrorAction SilentlyContinue)) {{
         log.info(f"[SWITCH] External switch exists: {ext}")
         return
 
-    # Find a wired adapter
     wired = run_ps(r"""
 $a = Get-NetAdapter |
     Where-Object { $_.Status -eq "Up" -and $_.Virtual -eq $false } |
@@ -455,23 +545,25 @@ if ($a) { $a.Name } else { "NONE" }
 
     wired = wired.strip()
     if wired == "NONE" or not wired:
-        log.warning(
-            "[SWITCH] No wired Ethernet adapter found — skipping External switch. "
-            "Lab VMs will reach the internet via the host NAT rule instead."
+        log.info(
+            "[SWITCH] No wired Ethernet adapter found — external switch skipped. "
+            "VMs use host NAT for internet access. ✅"
         )
         return
 
     log.info(f"[SWITCH] Creating external switch on wired adapter: {wired}")
-    run_ps(
+    _create_switch_with_reset(
         f'New-VMSwitch -Name "{ext}" -NetAdapterName "{wired}" -AllowManagementOS $true -ErrorAction Stop; '
-        f'Write-Output "External switch created: {ext}"'
+        f'Write-Output "External switch created: {ext}"',
+        ext
     )
-    # Wired adapter binding can still briefly destabilise vmms — restart to be safe
-    log.info("[SWITCH] Restarting vmms after external switch creation...")
+    log.info(f"[SWITCH] Restarting vmms after external switch creation...")
     run_ps("Restart-Service vmms -Force")
     time.sleep(10)
     ensure_vmms_running()
-    log.info(f"[SWITCH] External switch ready: {ext}")
+    log.info(f"[SWITCH] ✅ External switch ready: {ext}")
+
+
 
 
 def configure_router_network():
@@ -514,8 +606,8 @@ $cred = New-Object System.Management.Automation.PSCredential ("Administrator", $
 def create_vm(vm: dict, retries: int = 3):
     """
     Create a single VM from a config dict.
-    Retries up to `retries` times on Hyper-V transient failures,
-    restarting vmms between each attempt.
+    On Hyper-V WMI ObjectNotFound errors, performs a full WMI provider
+    reset between attempts rather than just restarting vmms.
     """
     name = vm["name"]
 
@@ -524,16 +616,36 @@ def create_vm(vm: dict, retries: int = 3):
             ensure_vmms_running()
             _create_vm_once(vm)
             return
-        except Exception as e:
-            log.warning(f"[VM] create_vm attempt {attempt}/{retries} failed for {name}: {e}")
+        except RuntimeError as e:
+            err = str(e)
+            is_wmi_error = "ObjectNotFound" in err or "VirtualizationException" in err
+
+            log.warning(
+                f"[VM] create_vm attempt {attempt}/{retries} failed for '{name}': "
+                f"{'WMI ObjectNotFound — will reset WMI provider' if is_wmi_error else err[:200]}"
+            )
+
             if attempt < retries:
-                log.info(f"[VM] Restarting vmms and retrying in 10s...")
-                try:
-                    run_ps("Restart-Service vmms -Force; Start-Sleep 10")
-                except Exception:
+                if is_wmi_error:
+                    log.info(f"[VM] Resetting Hyper-V WMI provider before retry...")
+                    _reset_hyperv_wmi()
+                    # Check if VM was actually created despite the error
+                    already = run_ps(
+                        f'if (Get-VM -Name "{name}" -ErrorAction SilentlyContinue) {{ "yes" }} else {{ "no" }}',
+                        return_output=True
+                    ) or ""
+                    if "yes" in already:
+                        log.info(f"[VM] '{name}' exists after WMI error — treating as success")
+                        return
+                else:
+                    log.info(f"[VM] Retrying in 10s...")
                     time.sleep(10)
             else:
-                raise
+                raise RuntimeError(
+                    f"[VM] Failed to create '{name}' after {retries} attempts.\n"
+                    f"{'WMI ObjectNotFound persists after reset — try rebooting the host.' if is_wmi_error else ''}\n"
+                    f"Last error: {err}"
+                )
 
 
 def _create_vm_once(vm: dict):
