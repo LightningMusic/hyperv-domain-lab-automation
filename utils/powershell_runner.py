@@ -1,3 +1,8 @@
+"""
+utils/powershell_runner.py
+Runs PowerShell commands and scripts from Python.
+Always uses absolute paths so CWD doesn't matter.
+"""
 import subprocess
 import ctypes
 import sys
@@ -5,16 +10,17 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-# Absolute log path — never depends on CWD
-_LOG_DIR  = r"C:\CVNP-Python\Python Projects\Lab Deployment\logs"
-_LOG_FILE = os.path.join(_LOG_DIR, "deployment.log")
+# Resolve project root from this file's location
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOG_DIR  = _PROJECT_ROOT / "logs"
+_LOG_FILE = _LOG_DIR / "deployment.log"
 
 
 class PowerShellRunner:
     def __init__(self, verbose=True, log_file=None, timeout=600):
         self.verbose  = verbose
         self.timeout  = timeout
-        self.log_file = log_file
+        self.log_file = str(log_file) if log_file else None
 
     def log(self, message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -31,53 +37,62 @@ class PowerShellRunner:
 
     @staticmethod
     def ensure_admin():
+        if sys.platform != "win32":
+            return  # skip on non-Windows (dev/test)
         if not ctypes.windll.shell32.IsUserAnAdmin():
             print("ERROR: Must be run as Administrator.")
             sys.exit(1)
 
-    def run(self, command, return_output=False):
-        self.log(f"PS> {command[:200].strip()}")
+    def run(self, command, return_output=False, ignore_stderr=False):
+        self.log(f"PS> {command[:300].strip()}")
         full_cmd = [
             "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
             "-Command", command
         ]
         try:
             result = subprocess.run(
-                full_cmd, capture_output=True, text=True, timeout=self.timeout
+                full_cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout
             )
         except subprocess.TimeoutExpired:
-            raise RuntimeError(f"PowerShell timed out:\n{command}")
+            raise RuntimeError(f"PowerShell timed out after {self.timeout}s:\n{command[:200]}")
 
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
 
-        if stdout: self.log(f"OUT: {stdout}")
-        if stderr: self.log(f"ERR: {stderr}")
+        if stdout:
+            self.log(f"OUT: {stdout}")
+        if stderr:
+            self.log(f"ERR: {stderr}")
 
-        if result.returncode != 0:
+        if result.returncode != 0 and not ignore_stderr:
             raise RuntimeError(
                 f"PowerShell failed (exit {result.returncode}).\n"
-                f"CMD: {command}\nERR: {stderr}"
+                f"CMD: {command[:300]}\nERR: {stderr}"
             )
-        if return_output:
-            return stdout
-        return None
+
+        return stdout if return_output else None
 
     def run_script(self, script_path):
-        p = Path(script_path)
+        p = Path(script_path).resolve()
         if not p.exists():
             raise FileNotFoundError(f"Script not found: {p}")
+        # Use & with full absolute path; no CWD dependency
         return self.run(f"& '{p}'", return_output=True)
 
 
 _runner = PowerShellRunner(verbose=True, log_file=_LOG_FILE)
 
 
-def run_ps(command, return_output=False):
-    return _runner.run(command, return_output=return_output)
+def run_ps(command, return_output=False, ignore_stderr=False):
+    return _runner.run(command, return_output=return_output, ignore_stderr=ignore_stderr)
+
 
 def run_ps_script(path):
     return _runner.run_script(path)
+
 
 def require_admin():
     PowerShellRunner.ensure_admin()
