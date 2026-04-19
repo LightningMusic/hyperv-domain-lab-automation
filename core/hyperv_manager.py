@@ -47,6 +47,11 @@ def run_step(step, func):
 def verify_environment():
     log.info("[VERIFY] Checking Hyper-V and ISOs")
     run_ps("""
+$s = Get-Service vmms
+if ($s.Status -ne 'Running') { Start-Service vmms; Start-Sleep 5 }
+Write-Output "vmms: $($s.Status)"
+""")
+    run_ps("""
 $f = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All
 if ($f.State -ne "Enabled") { throw "Hyper-V is not enabled." }
 Write-Output "Hyper-V OK"
