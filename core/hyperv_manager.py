@@ -352,60 +352,146 @@ if (-not (Test-Path $xmlSrc)) {{
 
 # ── Switches ────────────────────────────────────────────────────────────────
 
+def _adapter_is_wifi(adapter_name: str) -> bool:
+    """Return True if the adapter is a Wi-Fi / wireless interface."""
+    r = run_ps(
+        f'(Get-NetAdapter -Name "{adapter_name}" -ErrorAction SilentlyContinue).PhysicalMediaType',
+        return_output=True
+    ) or ""
+    # PhysicalMediaType 9 = Native 802.11 (Wi-Fi)
+    wifi_indicators = ["802.11", "wireless", "wi-fi", "wifi", "native 802"]
+    return any(x in r.lower() for x in wifi_indicators) or r.strip() == "9"
+
+
 def create_external_switch():
+    """
+    Create the lab virtual switches.
+
+    Strategy (Wi-Fi safe):
+    ──────────────────────
+    Creating an External Hyper-V switch bound to a Wi-Fi adapter is a
+    well-known Windows bug: vmms corrupts its own WMI namespace handle
+    during the operation, making ALL subsequent Hyper-V cmdlets throw
+    ObjectNotFound for the rest of that service lifetime — even after
+    Restart-Service vmms.
+
+    Solution: always create ONLY an Internal switch for lab traffic, then
+    configure Windows NAT (NetNat) on the HOST for internet access.
+    This avoids the Wi-Fi binding entirely and is actually better lab
+    architecture (isolated network, no bridge to host Wi-Fi).
+
+    If a genuine wired (Ethernet) adapter is available we DO create the
+    External switch as well, because wired adapters don't trigger the bug.
+    """
     ensure_vmms_running()
     ext = get_external_switch()
 
-    # Check what already exists BEFORE creating anything
-    existing_ext = run_ps(
-        f'if (Get-VMSwitch -Name "{ext}" -ErrorAction SilentlyContinue) {{ "exists" }} else {{ "missing" }}',
-        return_output=True
-    )
+    # ── 1. Internal switch (always needed, always safe) ───────────────────────
     existing_int = run_ps(
         f'if (Get-VMSwitch -Name "{SWITCH_NAME}" -ErrorAction SilentlyContinue) {{ "exists" }} else {{ "missing" }}',
         return_output=True
+    ) or ""
+
+    if "missing" in existing_int:
+        log.info(f"[SWITCH] Creating internal switch: {SWITCH_NAME}")
+        run_ps(
+            f'New-VMSwitch -Name "{SWITCH_NAME}" -SwitchType Internal -ErrorAction Stop; '
+            f'Write-Output "Internal switch created: {SWITCH_NAME}"'
+        )
+        # Internal-only switches rarely destabilise vmms, but wait briefly anyway
+        time.sleep(3)
+        ensure_vmms_running()
+    else:
+        log.info(f"[SWITCH] Internal switch exists: {SWITCH_NAME}")
+
+    # ── 2. Host NAT for outbound internet (replaces External switch on Wi-Fi) ──
+    nat_name = "AcmeLabNAT"
+    nat_prefix = "192.168.4.0/24"
+    gw_ip = "192.168.4.254"   # host-side gateway IP on the internal switch
+
+    run_ps(f"""
+# Assign the host IP on the internal switch adapter (if not already set)
+$ifAlias = (Get-NetAdapter | Where-Object {{ $_.Name -like "*{SWITCH_NAME}*" }}).Name
+if ($ifAlias) {{
+    $existing = Get-NetIPAddress -InterfaceAlias $ifAlias -IPAddress "{gw_ip}" -ErrorAction SilentlyContinue
+    if (-not $existing) {{
+        New-NetIPAddress -InterfaceAlias $ifAlias -IPAddress "{gw_ip}" -PrefixLength 24 -ErrorAction SilentlyContinue
+        Write-Output "Host gateway IP set: {gw_ip}"
+    }} else {{
+        Write-Output "Host gateway IP already set: {gw_ip}"
+    }}
+}}
+
+# Create NAT rule if missing
+if (-not (Get-NetNat -Name "{nat_name}" -ErrorAction SilentlyContinue)) {{
+    New-NetNat -Name "{nat_name}" -InternalIPInterfaceAddressPrefix "{nat_prefix}"
+    Write-Output "NAT created: {nat_name} → {nat_prefix}"
+}} else {{
+    Write-Output "NAT exists: {nat_name}"
+}}
+""")
+    log.info(f"[SWITCH] Host NAT configured ({nat_prefix})")
+
+    # ── 3. External switch — ONLY if a wired Ethernet adapter exists ──────────
+    existing_ext = run_ps(
+        f'if (Get-VMSwitch -Name "{ext}" -ErrorAction SilentlyContinue) {{ "exists" }} else {{ "missing" }}',
+        return_output=True
+    ) or ""
+
+    if "exists" in existing_ext:
+        log.info(f"[SWITCH] External switch exists: {ext}")
+        return
+
+    # Find a wired adapter
+    wired = run_ps(r"""
+$a = Get-NetAdapter |
+    Where-Object { $_.Status -eq "Up" -and $_.Virtual -eq $false } |
+    Where-Object { $_.PhysicalMediaType -notin @(9) -and
+                   $_.Name -notmatch "Wi.?Fi|Wireless|WLAN|802\.11" } |
+    Sort-Object LinkSpeed -Descending |
+    Select-Object -First 1
+if ($a) { $a.Name } else { "NONE" }
+""", return_output=True) or "NONE"
+
+    wired = wired.strip()
+    if wired == "NONE" or not wired:
+        log.warning(
+            "[SWITCH] No wired Ethernet adapter found — skipping External switch. "
+            "Lab VMs will reach the internet via the host NAT rule instead."
+        )
+        return
+
+    log.info(f"[SWITCH] Creating external switch on wired adapter: {wired}")
+    run_ps(
+        f'New-VMSwitch -Name "{ext}" -NetAdapterName "{wired}" -AllowManagementOS $true -ErrorAction Stop; '
+        f'Write-Output "External switch created: {ext}"'
     )
-
-    switches_created = False
-
-    if "missing" in (existing_ext or ""):
-        ps_ext = f"""
-$adapter = Get-NetAdapter | Where-Object {{$_.Status -eq "Up" -and $_.Virtual -eq $false}} |
-    Sort-Object -Property LinkSpeed -Descending | Select-Object -First 1
-if (-not $adapter) {{ throw "No physical network adapter found for external switch." }}
-New-VMSwitch -Name "{ext}" -NetAdapterName $adapter.Name -AllowManagementOS $true
-Write-Output "External switch created: {ext} (adapter: $($adapter.Name))"
-"""
-        run_ps(ps_ext, ignore_stderr=True)
-        switches_created = True
-        log.info(f"External switch created: {ext}")
-    else:
-        log.info(f"External switch exists: {ext}")
-
-    # vmms loses its WMI handle after New-VMSwitch on many Windows versions.
-    # Restart it now, before attempting the internal switch or any VM ops.
-    if switches_created:
-        log.info("[SWITCH] Restarting vmms to recover WMI handle after external switch creation...")
-        run_ps("Restart-Service vmms -Force")
-        time.sleep(8)
-        ensure_vmms_running()
-
-    if "missing" in (existing_int or ""):
-        run_ps(f'New-VMSwitch -Name "{SWITCH_NAME}" -SwitchType Internal; Write-Output "Internal switch created: {SWITCH_NAME}"',
-               ignore_stderr=True)
-        log.info(f"Internal switch created: {SWITCH_NAME}")
-        # Restart again after internal switch creation for same reason
-        log.info("[SWITCH] Restarting vmms after internal switch creation...")
-        run_ps("Restart-Service vmms -Force")
-        time.sleep(8)
-        ensure_vmms_running()
-    else:
-        log.info(f"Internal switch exists: {SWITCH_NAME}")
+    # Wired adapter binding can still briefly destabilise vmms — restart to be safe
+    log.info("[SWITCH] Restarting vmms after external switch creation...")
+    run_ps("Restart-Service vmms -Force")
+    time.sleep(10)
+    ensure_vmms_running()
+    log.info(f"[SWITCH] External switch ready: {ext}")
 
 
 def configure_router_network():
+    """
+    Add the external switch adapter to the router VM — but only if an
+    External switch actually exists.  On Wi-Fi-only machines the lab uses
+    host NAT instead, so no external adapter is needed on the VM.
+    """
     ensure_vmms_running()
     ext = get_external_switch()
+
+    switch_exists = run_ps(
+        f'if (Get-VMSwitch -Name "{ext}" -ErrorAction SilentlyContinue) {{ "yes" }} else {{ "no" }}',
+        return_output=True
+    ) or ""
+
+    if "yes" not in switch_exists:
+        log.info(f"[ROUTER] No external switch '{ext}' — skipping external adapter (using host NAT)")
+        return
+
     ps = f"""
 $existing = Get-VMNetworkAdapter -VMName "{ROUTER_VM}" -ErrorAction SilentlyContinue |
     Where-Object {{$_.SwitchName -eq "{ext}"}}
@@ -418,8 +504,6 @@ if (-not $existing) {{
 """
     run_ps(ps)
 
-
-# ── VM Creation ──────────────────────────────────────────────────────────────
 
 def _cred_block():
     return f"""
