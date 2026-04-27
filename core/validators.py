@@ -20,8 +20,11 @@ def _ps_in_vm(vm: str, cmd: str) -> str:
         return run_ps(f"""
 $sp   = ConvertTo-SecureString "{ADMIN_PASS}" -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential ("Administrator", $sp)
-Invoke-Command -VMName "{vm}" -Credential $cred -ErrorAction SilentlyContinue `
-    -ScriptBlock {{ {cmd} }}
+Invoke-Command -VMName "{vm}" -Credential $cred -ErrorAction Stop `
+    -ScriptBlock {{
+$ErrorActionPreference = "Stop"
+{cmd}
+}}
 """, return_output=True) or ""
     except Exception:
         return ""
@@ -82,8 +85,8 @@ def is_domain_joined(vm: str) -> bool:
 
 
 def gpo_applied(vm: str) -> bool:
-    r = _ps_in_vm(vm, "gpresult /r")
-    return "applied group policy objects" in _safe(r)
+    r = _ps_in_vm(vm, "gpresult /r /scope computer")
+    return "acme baseline policy" in _safe(r)
 
 
 def ou_exists(ou_dn: str) -> bool:

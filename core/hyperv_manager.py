@@ -61,100 +61,264 @@ def run_step(step, func):
 
 # ── Hyper-V WMI provider reset ───────────────────────────────────────────────
 
-def _reset_hyperv_wmi():
-    """
-    Hard-reset the Hyper-V WMI provider host.
+def _diagnose_hyperv() -> dict:
+    """Collect Hyper-V/WMI environment state. Returns key=value dict."""
+    result = run_ps(r"""
+$out = @{}
+$svc = Get-Service vmms -ErrorAction SilentlyContinue
+$out['vmms'] = if ($svc) { $svc.Status.ToString() } else { 'NOT_FOUND' }
+$ccm = Get-Service CcmExec -ErrorAction SilentlyContinue
+$out['ccmexec'] = if ($ccm) { $ccm.Status.ToString() } else { 'NOT_FOUND' }
+$wmi = @(Get-Process WmiPrvSE -ErrorAction SilentlyContinue)
+$out['wmiprvse_count'] = $wmi.Count
+$out['wmi_probe'] = try {
+    $null = Get-VMSwitch -ErrorAction Stop; 'OK'
+} catch [Microsoft.HyperV.PowerShell.VirtualizationException] { 'BROKEN_ObjectNotFound' }
+catch { 'OK' }
+$out['hvmod'] = if (Get-Module Hyper-V -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }
+$wmgmt = Get-Service winmgmt -ErrorAction SilentlyContinue
+$out['winmgmt'] = if ($wmgmt) { $wmgmt.Status.ToString() } else { 'NOT_FOUND' }
+$out.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }
+""", return_output=True) or ""
 
-    The symptom "ObjectNotFound" on ANY Hyper-V cmdlet (New-VMSwitch,
-    New-VHD, New-VM …) even when vmms reports Running means that the
-    WMI provider host process (WmiPrvSE.exe) that serves the Hyper-V
-    namespace has crashed or has a stale handle.
+    diag = {}
+    for line in result.strip().splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            diag[k.strip()] = v.strip()
+    return diag
 
-    Restarting vmms alone is not enough because Windows does not force-
-    kill WmiPrvSE — it just stops accepting new connections.  We have to:
-      1. Kill all WmiPrvSE.exe processes so the WMI service spawns fresh ones
-      2. Restart vmms (which re-registers its WMI provider on startup)
-      3. Restart the WMI service itself (winmgmt) to flush any cached handles
-      4. Wait for everything to stabilise and verify with a harmless read
+
+def _log_diag(diag: dict):
+    log.info(
+        f"[WMI] State: vmms={diag.get('vmms','?')}"
+        f"  wmi={diag.get('wmi_probe','?')}"
+        f"  winmgmt={diag.get('winmgmt','?')}"
+        f"  CcmExec={diag.get('ccmexec','?')}"
+        f"  WmiPrvSE\u00d7{diag.get('wmiprvse_count','?')}"
+    )
+
+
+def _reset_via_vmms_restart():
     """
-    log.info("[WMI] Resetting Hyper-V WMI provider chain...")
+    Restart vmms and kill stale WmiPrvSE processes.
+    Does NOT touch winmgmt — safe on corporate/managed machines.
+    vmms re-registers its WMI provider on startup.
+    """
+    log.info("[WMI] Strategy 1: restart vmms + clear WmiPrvSE...")
     run_ps("""
-# Step 1 — kill stale WMI provider host processes
-$procs = Get-Process -Name WmiPrvSE -ErrorAction SilentlyContinue
-if ($procs) {
-    $procs | Stop-Process -Force -ErrorAction SilentlyContinue
-    Write-Output "Killed $($procs.Count) WmiPrvSE process(es)"
-    Start-Sleep 3
-} else {
-    Write-Output "No WmiPrvSE processes to kill"
+# Kill stale WmiPrvSE processes (Hyper-V provider may be hanging)
+$killed = @(Get-Process WmiPrvSE -ErrorAction SilentlyContinue)
+$killed | Stop-Process -Force -ErrorAction SilentlyContinue
+if ($killed.Count -gt 0) {
+    Write-Output "Killed $($killed.Count) WmiPrvSE process(es)"
+    Start-Sleep 4
 }
 
-# Step 2 — stop vmms cleanly before winmgmt restart
+# Stop Hyper-V integration services that share vmms resources
+$hvServices = @('vmicvmsession','vmicheartbeat','vmicshutdown','vmicrdv','vmictimesync')
+foreach ($s in $hvServices) { Stop-Service $s -Force -ErrorAction SilentlyContinue }
+
+# Stop and restart vmms
 Stop-Service vmms -Force -ErrorAction SilentlyContinue
-Start-Sleep 2
+Start-Sleep 3
+Write-Output "vmms stopped"
 
-# Step 3 — restart WMI service to flush provider registrations
-Restart-Service winmgmt -Force
-Start-Sleep 5
-
-# Step 4 — restart vmms so it re-registers its WMI provider
 Start-Service vmms
 $deadline = (Get-Date).AddSeconds(45)
-while ((Get-Service vmms).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
-    Start-Sleep 2
-}
-$status = (Get-Service vmms).Status
-Write-Output "vmms after reset: $status"
-if ($status -ne 'Running') { throw "vmms failed to restart after WMI reset" }
-Start-Sleep 5   # give the provider time to fully register
+while ((Get-Service vmms).Status -ne 'Running' -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
+$st = (Get-Service vmms).Status
+Write-Output "vmms restarted: $st"
+Start-Sleep 12   # critical wait for WMI provider to register
 
-# Step 5 — verify the WMI handle works with a harmless read
 try {
     $null = Get-VMSwitch -ErrorAction Stop
-    Write-Output "WMI probe: OK (Get-VMSwitch succeeded)"
+    Write-Output "vmms-restart probe: PASSED"
 } catch {
-    Write-Output "WMI probe warning: $($_.Exception.Message)"
+    Write-Output "vmms-restart probe: FAILED"
 }
 """)
-    log.info("[WMI] Hyper-V WMI provider reset complete")
+    log.info("[WMI] vmms restart complete")
 
 
-def ensure_vmms_running():
+def _reset_via_mofcomp():
     """
-    Verify vmms is Running.  If it is not, or if the WMI provider is
-    broken (ObjectNotFound on a read), perform a full WMI reset.
+    Re-register the Hyper-V WMI provider using mofcomp.exe.
+    Fixes broken WMI handles without touching winmgmt.
+    mofcomp compiles MOF definitions directly into the WMI repository.
     """
-    probe = run_ps("""
+    log.info("[WMI] Strategy 2: mofcomp MOF re-registration...")
+    run_ps(r"""
+Stop-Service vmms -Force -ErrorAction SilentlyContinue
+Start-Sleep 2
+Get-Process WmiPrvSE -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep 3
+
+# Re-register Hyper-V WMI provider MOF files
+$mofs = @(
+    "$env:SystemRoot\System32\VirtMgmt.mof",
+    "$env:SystemRoot\System32\vmms.mof"
+)
+foreach ($mof in $mofs) {
+    if (Test-Path $mof) {
+        Write-Output "Recompiling: $mof"
+        & mofcomp.exe $mof 2>&1 | Select-Object -Last 1
+    }
+}
+
+# Also check for any Hyper-V MOFs
+Get-ChildItem "$env:SystemRoot\System32" -Filter "*.mof" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match "^(virt|vmms)" } |
+    ForEach-Object {
+        Write-Output "Recompiling: $($_.Name)"
+        & mofcomp.exe $_.FullName 2>&1 | Select-Object -Last 1
+    }
+
+Start-Sleep 2
+Start-Service vmms -ErrorAction SilentlyContinue
+$deadline = (Get-Date).AddSeconds(30)
+while ((Get-Service vmms).Status -ne 'Running' -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
+Write-Output "vmms after mofcomp: $((Get-Service vmms).Status)"
+Start-Sleep 10
+
+try {
+    $null = Get-VMSwitch -ErrorAction Stop
+    Write-Output "mofcomp probe: PASSED"
+} catch {
+    Write-Output "mofcomp probe: FAILED"
+}
+""")
+    log.info("[WMI] mofcomp re-registration complete")
+
+
+def _reset_hyperv_wmi():
+    """
+    Orchestrate WMI recovery without touching winmgmt.
+    Strategy 1: vmms restart + WmiPrvSE kill (~20s)
+    Strategy 2: mofcomp MOF re-registration (~40s)
+    """
+    diag = _diagnose_hyperv()
+    _log_diag(diag)
+
+    _reset_via_vmms_restart()
+
+    # Quick check
+    quick = run_ps("""
+try { $null = Get-VMSwitch -ErrorAction Stop; "OK" }
+catch [Microsoft.HyperV.PowerShell.VirtualizationException] { "BROKEN" }
+catch { "OK" }
+""", return_output=True) or ""
+
+    if quick.strip() == "OK":
+        log.info("[WMI] ✅ Recovered via vmms restart")
+        return
+
+    log.info("[WMI] vmms restart insufficient — trying mofcomp...")
+    _reset_via_mofcomp()
+
+
+def _force_reimport_hyperv_module():
+    """Fast path: reimport Hyper-V PS module to refresh WMI bindings."""
+    run_ps("""
+Remove-Module Hyper-V -ErrorAction SilentlyContinue
+Import-Module Hyper-V -Force -ErrorAction SilentlyContinue
+try {
+    $null = Get-VMSwitch -ErrorAction Stop
+    Write-Output "Module probe: PASSED"
+} catch {
+    Write-Output "Module probe: FAILED"
+}
+""")
+
+
+def ensure_vmms_running(max_reset_attempts: int = 2):
+    """
+    Verify the Hyper-V WMI provider is healthy and recover if broken.
+    Never restarts winmgmt (protected on corporate/SCCM-managed machines).
+
+    Recovery ladder:
+      1. Fast (~3s):  reimport Hyper-V PS module
+      2. Medium (~20s): restart vmms + kill WmiPrvSE
+      3. Slow (~40s):   mofcomp MOF re-registration
+    """
+    for attempt in range(1, max_reset_attempts + 2):
+        probe = run_ps("""
 $svc = Get-Service -Name vmms -ErrorAction SilentlyContinue
-if (-not $svc) { "NOT_INSTALLED"; exit }
-if ($svc.Status -ne 'Running') { "NOT_RUNNING"; exit }
-# Probe the WMI provider — if this throws ObjectNotFound the handle is broken
+if (-not $svc)                 { "NOT_INSTALLED"; exit }
+if ($svc.Status -ne 'Running') { "NOT_RUNNING";   exit }
 try {
     $null = Get-VMSwitch -ErrorAction Stop
     "OK"
-} catch [Microsoft.HyperV.PowerShell.VirtualizationException] {
-    "WMI_BROKEN"
-} catch {
-    "OK"   # other errors (e.g. no switches yet) are fine
-}
+} catch [Microsoft.HyperV.PowerShell.VirtualizationException] { "WMI_BROKEN" }
+catch { "OK" }
 """, return_output=True) or ""
 
-    probe = probe.strip()
-    log.debug(f"[WMI] vmms probe: {probe}")
+        probe = probe.strip()
 
-    if probe == "NOT_INSTALLED":
+        if probe == "NOT_INSTALLED":
+            raise RuntimeError(
+                "\n[WMI ERROR] Hyper-V (vmms) is not installed.\n"
+                "Fix: Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All\n"
+                "Then reboot and retry."
+            )
+
+        if probe == "OK":
+            if attempt > 1:
+                log.info("[WMI] ✅ WMI provider healthy")
+            return
+
+        if probe == "NOT_RUNNING":
+            log.warning(f"[WMI] vmms stopped (attempt {attempt}) — starting...")
+            run_ps("Start-Service vmms; Start-Sleep 8")
+            continue
+
+        if probe == "WMI_BROKEN":
+            log.warning(f"[WMI] WMI ObjectNotFound (attempt {attempt}/{max_reset_attempts + 1})")
+
+            if attempt == 1:
+                log.info("[WMI] Fast path: reimporting Hyper-V PS module...")
+                _force_reimport_hyperv_module()
+                time.sleep(3)
+                continue
+
+            log.info("[WMI] Full reset: vmms restart + mofcomp...")
+            _reset_hyperv_wmi()
+            time.sleep(5)
+            continue
+
+    # Final probe
+    final = run_ps("""
+try { $null = Get-VMSwitch -ErrorAction Stop; "OK" }
+catch [Microsoft.HyperV.PowerShell.VirtualizationException] { "WMI_BROKEN" }
+catch { "OK" }
+""", return_output=True) or ""
+
+    if final.strip() != "OK":
+        diag = _diagnose_hyperv()
+        _log_diag(diag)
         raise RuntimeError(
-            "Hyper-V (vmms) is not installed. "
-            "Enable Hyper-V via: Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All"
+            f"\n{'='*65}\n"
+            f"[WMI FATAL] Hyper-V WMI provider cannot be recovered automatically.\n"
+            f"{'='*65}\n"
+            f"  vmms:      {diag.get('vmms','?')}\n"
+            f"  WMI probe: {diag.get('wmi_probe','?')}\n"
+            f"  winmgmt:   {diag.get('winmgmt','?')} (NOT restarted — protected on this machine)\n"
+            f"  CcmExec:   {diag.get('ccmexec','?')} (SCCM/ConfigMgr agent detected)\n"
+            f"  WmiPrvSE:  {diag.get('wmiprvse_count','?')} processes\n"
+            f"\n"
+            f"This machine is corporate-managed. The Hyper-V WMI namespace\n"
+            f"is in a state that requires a FULL REBOOT to recover.\n"
+            f"\n"
+            f"ACTION: Reboot the host, then run: python main.py build\n"
+            f"\n"
+            f"If it recurs after reboot, run in elevated PowerShell:\n"
+            f"  Stop-Service vmms -Force\n"
+            f"  Get-Process WmiPrvSE | Stop-Process -Force\n"
+            f"  mofcomp.exe $env:SystemRoot\\System32\\VirtMgmt.mof\n"
+            f"  Start-Service vmms\n"
+            f"{'='*65}"
         )
-
-    if probe in ("NOT_RUNNING", "WMI_BROKEN"):
-        reason = "service stopped" if probe == "NOT_RUNNING" else "WMI provider broken (ObjectNotFound)"
-        log.warning(f"[WMI] vmms problem detected: {reason} — performing full reset")
-        _reset_hyperv_wmi()
-    else:
-        log.debug("[WMI] vmms OK")
-
+    log.info("[WMI] ✅ WMI provider recovered")
 
 
 # ── Validation ──────────────────────────────────────────────────────────────
@@ -603,6 +767,56 @@ $sp   = ConvertTo-SecureString "{ADMIN_PASS}" -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential ("Administrator", $sp)"""
 
 
+def _repair_stale_vm_registration(name: str, vm_path: str, vhd_path: str):
+    """
+    If Hyper-V still has a VM registration but its backing config/runtime files
+    are missing, remove only the stale registration so the normal create path
+    can rebuild it against the existing disks.
+    """
+    def ps_path(p): return p.replace("\\", "\\\\")
+
+    result = run_ps(f"""
+$vm = Get-VM -Name "{name}" -ErrorAction SilentlyContinue
+if (-not $vm) {{
+    "MISSING"
+    exit 0
+}}
+
+$configRoot = Join-Path "{ps_path(vm_path)}" "{name}"
+$vmStore    = Join-Path $configRoot "Virtual Machines"
+$vmcx       = Join-Path $vmStore "$($vm.Id).vmcx"
+$vmgs       = Join-Path $vmStore "$($vm.Id).vmgs"
+$primaryVhd = "{ps_path(vhd_path)}"
+
+$missing = @()
+if (-not (Test-Path $primaryVhd)) {{ $missing += "primary-vhd" }}
+if (-not (Test-Path $configRoot))  {{ $missing += "config-root" }}
+if (-not (Test-Path $vmStore))     {{ $missing += "vm-store" }}
+if (-not (Test-Path $vmcx))        {{ $missing += "vmcx" }}
+if (-not (Test-Path $vmgs))        {{ $missing += "vmgs" }}
+
+if ($missing.Count -eq 0) {{
+    "HEALTHY"
+    exit 0
+}}
+
+Write-Output ("STALE:" + ($missing -join ","))
+if ($vm.State -ne "Off") {{
+    Stop-VM -Name "{name}" -TurnOff -Force -ErrorAction SilentlyContinue
+    Start-Sleep 3
+}}
+Remove-VM -Name "{name}" -Force -ErrorAction Stop
+Write-Output "REMOVED"
+""", return_output=True) or ""
+
+    status = result.strip()
+    if status.startswith("STALE:") or "REMOVED" in result:
+        reason = status.split(":", 1)[1] if ":" in status else "missing backing files"
+        log.warning(f"[VM] Removed stale Hyper-V registration for '{name}' ({reason})")
+    elif status == "HEALTHY":
+        log.info(f"[VM] Existing VM registration is healthy: {name}")
+
+
 def create_vm(vm: dict, retries: int = 3):
     """
     Create a single VM from a config dict.
@@ -667,6 +881,8 @@ def _create_vm_once(vm: dict):
     vm_path  = os.path.join(LAB_ROOT, name)
     vhd_path = os.path.join(vm_path, f"{name}.vhdx")
     os.makedirs(vm_path, exist_ok=True)
+
+    _repair_stale_vm_registration(name, vm_path, vhd_path)
 
     if is_windows_installed(name):
         log.info(f"[SKIP] OS already installed on {name}")
@@ -767,22 +983,57 @@ def create_workstation_vm():
 
 def is_windows_installed(vm_name: str) -> bool:
     """
-    Mount the primary VHD and check for C:\\Windows\\System32.
-    Returns True only when Windows is confirmed installed.
+    Determine whether a Windows guest has finished enough of setup to be
+    reachable by Hyper-V integration signals.
+
+    When the VM is running, avoid mounting its VHD from the host because an
+    attached system disk usually cannot be mounted read-only and would cause
+    false negatives forever. In that case, prefer Heartbeat/IP visibility.
+
+    When the VM is off, fall back to offline VHD inspection.
     """
     ps = f"""
 $vm = Get-VM -Name "{vm_name}" -ErrorAction SilentlyContinue
 if (-not $vm) {{ "False"; exit }}
+
+if ($vm.State -eq "Running") {{
+    $hb = Get-VMIntegrationService -VMName "{vm_name}" -Name "Heartbeat" -ErrorAction SilentlyContinue
+    if ($hb -and $hb.PrimaryStatusDescription -eq "OK") {{
+        "True"
+        exit
+    }}
+
+    $ips = @(Get-VMNetworkAdapter -VMName "{vm_name}" -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty IPAddresses -ErrorAction SilentlyContinue)
+    $usableIp = $ips | Where-Object {{
+        $_ -match '^\\d+\\.\\d+\\.\\d+\\.\\d+$' -and
+        $_ -notlike '169.254*' -and
+        $_ -ne '0.0.0.0'
+    }} | Select-Object -First 1
+    if ($usableIp) {{
+        "True"
+        exit
+    }}
+
+    "False"
+    exit
+}}
+
 $vhds = Get-VMHardDiskDrive -VMName "{vm_name}" -ErrorAction SilentlyContinue
 if (-not $vhds) {{ "False"; exit }}
 $vhd = $vhds[0].Path
 if (-not (Test-Path $vhd)) {{ "False"; exit }}
 try {{
     $m = Mount-VHD -Path $vhd -ReadOnly -Passthru -ErrorAction Stop
-    $letter = ($m | Get-Disk | Get-Partition |
-        Get-Volume | Where-Object {{ $_.FileSystemLabel -eq "Windows" }}).DriveLetter |
-        Select-Object -First 1
-    if ($letter -and (Test-Path "$($letter):\\Windows\\System32\\ntoskrnl.exe")) {{
+    $volumes = $m | Get-Disk | Get-Partition | Get-Volume -ErrorAction SilentlyContinue
+    $installed = $false
+    foreach ($vol in $volumes) {{
+        if ($vol.DriveLetter -and (Test-Path "$($vol.DriveLetter):\\Windows\\System32\\ntoskrnl.exe")) {{
+            $installed = $true
+            break
+        }}
+    }}
+    if ($installed) {{
         "True"
     }} else {{
         "False"

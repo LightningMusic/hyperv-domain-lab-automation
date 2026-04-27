@@ -45,9 +45,14 @@ class PowerShellRunner:
 
     def run(self, command, return_output=False, ignore_stderr=False):
         self.log(f"PS> {command[:300].strip()}")
+        wrapped_command = (
+            "$ErrorActionPreference = 'Stop'; "
+            "$ProgressPreference = 'SilentlyContinue'; "
+            + command
+        )
         full_cmd = [
-            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-Command", command
+            "powershell", "-NoLogo", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-Command", wrapped_command
         ]
         try:
             result = subprocess.run(

@@ -5,6 +5,7 @@ Usage: python main.py [build|destroy|rebuild|status|reset]
 import argparse
 import sys
 import os
+from prompt_toolkit import prompt
 
 # ── Resolve project root so all relative paths work regardless of CWD ────────
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -61,32 +62,7 @@ def cmd_reset():
 
 def main():
     require_admin()
-
-    # Change working directory to project root so relative imports and paths work
     os.chdir(PROJECT_ROOT)
-
-    parser = argparse.ArgumentParser(
-        description="ACME Hyper-V Lab Automation Tool",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Commands:
-  build    Deploy the full lab from scratch
-  destroy  Tear down all VMs, switches, and disks
-  rebuild  destroy + build (full reset)
-  status   Show current VM states
-  reset    Clear deployment checkpoint state only
-        """
-    )
-    parser.add_argument(
-        "command",
-        choices=["build", "destroy", "rebuild", "status", "reset"]
-    )
-
-    if len(sys.argv) < 2:
-        parser.print_help()
-        sys.exit(1)
-
-    args = parser.parse_args()
 
     dispatch = {
         "build":   cmd_build,
@@ -95,7 +71,53 @@ Commands:
         "status":  cmd_status,
         "reset":   cmd_reset,
     }
-    dispatch[args.command]()
+
+    parser = argparse.ArgumentParser(
+        description="ACME Hyper-V Lab Automation Tool"
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",  # <-- makes it optional
+        choices=dispatch.keys()
+    )
+
+    args = parser.parse_args()
+
+    # ── If command passed → run once (original behavior) ──
+    if args.command:
+        dispatch[args.command]()
+        return
+
+    # ── Interactive mode ──
+    print("\n🧠 ACME Lab Interactive Mode")
+    print("Type a command: build, destroy, rebuild, status, reset")
+    print("Type 'help' or 'exit'\n")
+
+    while True:
+        try:
+            cmd = prompt("ACME Lab > ")
+
+            if not cmd:
+                continue
+
+            if cmd in ("exit", "quit"):
+                print("Exiting.")
+                break
+
+            if cmd == "help":
+                print("Commands:", ", ".join(dispatch.keys()))
+                continue
+
+            if cmd in dispatch:
+                dispatch[cmd]()
+            else:
+                print(f"Unknown command: {cmd}")
+
+        except KeyboardInterrupt:
+            print("\nExiting.")
+            break
+        except Exception as e:
+            print(f"[ERROR] {e}")
 
 
 if __name__ == "__main__":
