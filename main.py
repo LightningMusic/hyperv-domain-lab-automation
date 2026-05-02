@@ -26,7 +26,7 @@ def cmd_destroy():
     if not os.path.exists(LAB_DESTROY_SCRIPT):
         print(f"[WARN] destroy_lab.ps1 not found at {LAB_DESTROY_SCRIPT} — skipping PS teardown")
     else:
-        run_ps_script(LAB_DESTROY_SCRIPT)
+        run_ps(f"& '{LAB_DESTROY_SCRIPT}' -Force")
     reset_state()
     reset_build()
     print("\nLab destroyed.\n")
