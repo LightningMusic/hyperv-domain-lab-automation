@@ -29,7 +29,7 @@
                xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
       <ComputerName>AcmePDC01</ComputerName>
       <AutoLogon>
-        <Username>Administrator</Username><Enabled>true</Enabled><LogonCount>99</LogonCount>
+        <Username>Administrator</Username><Enabled>true</Enabled><LogonCount>5</LogonCount>
         <Password><Value>Password123!</Value><PlainText>true</PlainText></Password>
       </AutoLogon>
       <UserAccounts>

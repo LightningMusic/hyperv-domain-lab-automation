@@ -3,6 +3,7 @@ main.py — ACME Hyper-V Lab Automation
 Usage: python main.py [build|destroy|rebuild|status|reset]
 """
 import argparse
+import importlib
 import sys
 import os
 from prompt_toolkit import prompt
@@ -12,13 +13,25 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 from utils.powershell_runner import run_ps, run_ps_script, require_admin
 from utils.checkpoint        import reset_state
-from core.environment_builder import build_lab, reset_build
 
 LAB_DESTROY_SCRIPT = os.path.join(PROJECT_ROOT, "destroy_lab.ps1")
 
 
+def _load_environment_builder():
+    modules_to_refresh = [
+        "core.hyperv_manager",
+        "core.environment_builder",
+    ]
+    loaded = {}
+    for module_name in modules_to_refresh:
+        module = importlib.import_module(module_name)
+        loaded[module_name] = importlib.reload(module)
+    return loaded["core.environment_builder"]
+
+
 def cmd_build():
-    build_lab()
+    env_builder = _load_environment_builder()
+    env_builder.build_lab()
 
 
 def cmd_destroy():
@@ -28,7 +41,8 @@ def cmd_destroy():
     else:
         run_ps(f"& '{LAB_DESTROY_SCRIPT}' -Force")
     reset_state()
-    reset_build()
+    env_builder = _load_environment_builder()
+    env_builder.reset_build()
     print("\nLab destroyed.\n")
 
 
@@ -56,7 +70,8 @@ if (-not $vms) {
 def cmd_reset():
     print("\n🔁 Resetting state...\n")
     reset_state()
-    reset_build()
+    env_builder = _load_environment_builder()
+    env_builder.reset_build()
     print("State reset. Run 'python main.py build' to redeploy.\n")
 
 

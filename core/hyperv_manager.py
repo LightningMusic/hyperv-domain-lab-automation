@@ -229,6 +229,115 @@ $sp   = ConvertTo-SecureString "{ADMIN_PASS}" -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential ("Administrator", $sp)"""
 
 
+def _vm_has_matching_data_disk(name: str, disk_prefix: str) -> bool:
+    ps = f"""
+$vmName = "{name}"
+$diskPrefix = "{disk_prefix}"
+
+$match = Get-VMHardDiskDrive -VMName $vmName -ErrorAction SilentlyContinue |
+    Where-Object {{ [System.IO.Path]::GetFileName($_.Path).StartsWith($diskPrefix, [System.StringComparison]::OrdinalIgnoreCase) }} |
+    Select-Object -First 1
+
+if ($match) {{ "True" }} else {{ "False" }}
+"""
+    out = run_ps(ps, return_output=True) or "False"
+    return "True" in out
+
+
+def _ensure_vhd_file(disk_path: str, size_gb: int):
+    run_ps(f"""
+$diskPath = "{disk_path}"
+if (-not (Test-Path $diskPath)) {{
+    New-VHD -Path $diskPath -SizeBytes {size_gb}GB -Dynamic | Out-Null
+    Write-Output "Disk created: $diskPath"
+}} else {{
+    Write-Output "Disk file exists: $diskPath"
+}}
+""")
+
+
+def _attach_vm_disk(name: str, disk_path: str):
+    run_ps(f"""
+$vmName = "{name}"
+$diskPath = "{disk_path}"
+
+if (-not (Get-VM -Name $vmName -ErrorAction SilentlyContinue)) {{
+    throw "VM not found: $vmName"
+}}
+
+$existing = Get-VMHardDiskDrive -VMName $vmName -ErrorAction SilentlyContinue |
+    Where-Object {{ $_.Path -eq $diskPath }} |
+    Select-Object -First 1
+if ($existing) {{
+    Write-Output "Disk already attached: $diskPath"
+    exit
+}}
+
+$lastError = $null
+for ($attempt = 1; $attempt -le 5; $attempt++) {{
+    try {{
+        Add-VMHardDiskDrive -VMName $vmName -Path $diskPath -ErrorAction Stop
+        Write-Output "Disk attached: $diskPath"
+        exit
+    }} catch {{
+        $lastError = $_
+
+        $attachedNow = Get-VMHardDiskDrive -VMName $vmName -ErrorAction SilentlyContinue |
+            Where-Object {{ $_.Path -eq $diskPath }} |
+            Select-Object -First 1
+        if ($attachedNow) {{
+            Write-Output "Disk already attached after retry: $diskPath"
+            exit
+        }}
+
+        if ($attempt -eq 5) {{
+            throw
+        }}
+
+        Start-Sleep -Seconds (2 * $attempt)
+    }}
+}}
+
+throw $lastError
+""")
+
+
+def _ensure_vm_data_disk(name: str, disk_path: str, size_gb: int):
+    disk_dir = os.path.dirname(disk_path)
+    disk_name = os.path.basename(disk_path)
+    disk_stem, disk_ext = os.path.splitext(disk_name)
+
+    if _vm_has_matching_data_disk(name, disk_stem):
+        log.info(f"[VM] Matching data disk already attached for {name}: {disk_stem}")
+        return
+
+    candidates = [disk_path]
+    for i in range(1, 6):
+        candidates.append(os.path.join(disk_dir, f"{disk_stem}_retry{i}{disk_ext}"))
+
+    last_error = None
+    for candidate in candidates:
+        if _vm_has_matching_data_disk(name, disk_stem):
+            log.info(f"[VM] Matching data disk already attached for {name}: {disk_stem}")
+            return
+
+        _ensure_vhd_file(candidate, size_gb)
+        try:
+            _attach_vm_disk(name, candidate)
+            if candidate != disk_path:
+                log.warning(f"[VM] Attached recovery disk for {name}: {candidate}")
+            return
+        except RuntimeError as exc:
+            last_error = exc
+            msg = str(exc)
+            is_lock_error = "0x80070020" in msg or "being used by another process" in msg
+            if not is_lock_error:
+                raise
+            log.warning(f"[VM] Disk path locked for {name}, trying next candidate: {candidate}")
+
+    raise RuntimeError(f"Unable to attach any data disk for {name}. Last error: {last_error}")
+
+
 def create_vm(vm: dict):
     name = vm["name"]
     ram  = vm.get("ram_gb", 2) * 1024
@@ -294,14 +403,7 @@ Write-Output "VM created: $vmName"
 
     for i, size in enumerate(vm.get("additional_disks_gb", []), 1):
         dp = os.path.join(vm_path, f"{name}_data{i}.vhdx")
-        run_ps(f"""
-if (-not (Test-Path "{dp}")) {{
-    New-VHD -Path "{dp}" -SizeBytes {size}GB -Dynamic
-}}
-if (Get-VM -Name "{name}" -ErrorAction SilentlyContinue) {{
-    Add-VMHardDiskDrive -VMName "{name}" -Path "{dp}"
-}}
-""")
+        _ensure_vm_data_disk(name, dp, size)
 
 
 def create_router_vm():
@@ -346,7 +448,7 @@ if ($vm.State -eq "Running") {{
     $ips = @(Get-VMNetworkAdapter -VMName "{vm_name}" -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty IPAddresses)
     $usable = $ips | Where-Object {{
-        $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notlike '169.254*' -and $_ -ne '0.0.0.0'
+        $_ -match '^\\d+\\.\\d+\\.\\d+\\.\\d+$' -and $_ -notlike '169.254*' -and $_ -ne '0.0.0.0'
     }} | Select-Object -First 1
     if ($usable) {{ "True"; exit }}
 
