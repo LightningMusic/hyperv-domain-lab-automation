@@ -7,6 +7,8 @@
 
   "install_media": {
     "server_iso":       "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
+    "server_2019_iso":  "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
+    "server_2022_iso":  "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
     "windows_iso":      "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Windows_11_Eval.iso",
     "Ubuntu_server_iso":"C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Ubuntu-24.04.4-live-server-amd64.iso"
   },
@@ -47,6 +49,18 @@
       "name": "AcmeWks1001", "role": "workstation",
       "generation": 2, "cpu": 1, "ram_gb": 2, "disk_gb": 60,
       "network": "AcmeBusiness", "ip": "192.168.4.100"
+    },
+    {
+      "name": "AcmeFtp01", "role": "ftp_server",
+      "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 60,
+      "network": "AcmeBusiness",
+      "_note": "Mirrors the real comp topology's FTP box — Server 2022"
+    },
+    {
+      "name": "AcmeWeb02", "role": "web_server_win",
+      "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 60,
+      "network": "AcmeBusiness",
+      "_note": "Mirrors the real comp topology's Windows Web box — Server 2019. Not the same as AcmeWeb01 below (that's the aspirational Ubuntu/Apache entry, unused by the real pipeline)."
     },
     {
       "name": "AcmePDC02", "role": "storage",
@@ -129,7 +143,7 @@
   },
 
   "domain_join": {
-    "workstations": ["AcmeWks1001"],
+    "workstations": ["AcmeWks1001", "AcmeFtp01", "AcmeWeb02"],
     "target_ou":    "CorporateOffice/Computers"
   },
 

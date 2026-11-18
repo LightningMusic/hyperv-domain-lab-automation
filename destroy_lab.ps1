@@ -12,6 +12,8 @@ $vmNames = @(
     "AcmePDC01",
     "AcmePDC02",
     "AcmeWks1001",
+    "AcmeFtp01",
+    "AcmeWeb02",
     "AcmeWeb01"
 )
 

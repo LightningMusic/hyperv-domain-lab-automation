@@ -73,6 +73,22 @@ def get_server_iso():
     return _abs(v) if v else str(PROJECT_ROOT / "install_media" / "SERVER_EVAL_x64FRE_en-us.iso")
 
 
+def get_server_2019_iso():
+    """
+    Falls back to server_2019_iso -> server_iso -> the default eval-ISO name,
+    in that order, so this works even before you've split your media into
+    per-version files (both roles just install from whatever's there).
+    """
+    v = get_install_media().get("server_2019_iso", "")
+    return _abs(v) if v else get_server_iso()
+
+
+def get_server_2022_iso():
+    """Same fallback behavior as get_server_2019_iso()."""
+    v = get_install_media().get("server_2022_iso", "")
+    return _abs(v) if v else get_server_iso()
+
+
 def get_win11_iso():
     v = get_install_media().get("windows_iso", "")
     return _abs(v) if v else str(PROJECT_ROOT / "install_media" / "Windows_11_Eval.iso")
@@ -142,11 +158,13 @@ def get_vm_name(role):
     return get_vm_by_role(role).get("name", "")
 
 
-def get_router_name():      return get_vm_name("router")
-def get_dc_name():          return get_vm_name("domain_controller")
-def get_workstation_name(): return get_vm_name("workstation")
-def get_storage_vm_name():  return get_vm_name("storage")
-def get_web_vm_name():      return get_vm_name("web")
+def get_router_name():         return get_vm_name("router")
+def get_dc_name():             return get_vm_name("domain_controller")
+def get_workstation_name():    return get_vm_name("workstation")
+def get_ftp_server_name():     return get_vm_name("ftp_server")
+def get_win_web_server_name(): return get_vm_name("web_server_win")
+def get_storage_vm_name():     return get_vm_name("storage")
+def get_web_vm_name():         return get_vm_name("web")
 
 
 # ------------------------------------------------------- ACTIVE DIRECTORY ---
