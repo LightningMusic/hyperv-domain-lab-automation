@@ -6,9 +6,8 @@ import os, time, threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config_loader import (
     load_config, get_lab_root, get_unattend_dir,
-    get_server_iso, get_server_2019_iso, get_server_2022_iso, get_win11_iso,
+    get_server_iso, get_win11_iso,
     get_router_name, get_dc_name, get_workstation_name,
-    get_ftp_server_name, get_win_web_server_name,
     get_internal_switch, get_external_switch, get_admin_password
 )
 from utils.powershell_runner import run_ps
@@ -16,19 +15,15 @@ from utils.logger import get_logger
 
 log = get_logger("hyperv_manager")
 
-LAB_ROOT        = get_lab_root()
-UNATTEND_DIR    = get_unattend_dir()
-SERVER_ISO      = get_server_iso()
-SERVER_2019_ISO = get_server_2019_iso()
-SERVER_2022_ISO = get_server_2022_iso()
-WIN11_ISO       = get_win11_iso()
-SWITCH_NAME     = get_internal_switch()
-ADMIN_PASS      = get_admin_password()
-ROUTER_VM       = get_router_name()
-DC_VM           = get_dc_name()
-WORKSTATION_VM  = get_workstation_name()
-FTP_SERVER_VM   = get_ftp_server_name()
-WEB_SERVER_VM   = get_win_web_server_name()
+LAB_ROOT       = get_lab_root()
+UNATTEND_DIR   = get_unattend_dir()
+SERVER_ISO     = get_server_iso()
+WIN11_ISO      = get_win11_iso()
+SWITCH_NAME    = get_internal_switch()
+ADMIN_PASS     = get_admin_password()
+ROUTER_VM      = get_router_name()
+DC_VM          = get_dc_name()
+WORKSTATION_VM = get_workstation_name()
 CHECKPOINT_FILE = os.path.join(LAB_ROOT, "deployment_state.txt")
 
 
@@ -59,7 +54,7 @@ $f = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All
 if ($f.State -ne "Enabled") { throw "Hyper-V is not enabled on this machine." }
 Write-Output "Hyper-V OK"
 """)
-    for iso in (SERVER_2019_ISO, SERVER_2022_ISO, WIN11_ISO):
+    for iso in (SERVER_ISO, WIN11_ISO):
         if not os.path.exists(iso):
             raise FileNotFoundError(f"ISO not found: {iso}")
     log.info("[VERIFY] Environment OK")
@@ -68,7 +63,7 @@ verify_hyperv_installed = verify_environment  # alias
 
 
 def verify_iso_files():
-    for iso in (SERVER_2019_ISO, SERVER_2022_ISO, WIN11_ISO):
+    for iso in (SERVER_ISO, WIN11_ISO):
         if not os.path.exists(iso):
             raise FileNotFoundError(f"ISO not found: {iso}")
     log.info("ISOs verified.")
@@ -136,7 +131,7 @@ def _server_xml(computer_name):
 
 def generate_unattend_files():
     create_unattend_directory()
-    for vm_name in (ROUTER_VM, DC_VM, WORKSTATION_VM, FTP_SERVER_VM, WEB_SERVER_VM):
+    for vm_name in (ROUTER_VM, DC_VM, WORKSTATION_VM):
         path = os.path.join(UNATTEND_DIR, f"{vm_name}_autounattend.xml")
         with open(path, "w", encoding="utf-8") as f:
             f.write(_server_xml(vm_name))
@@ -343,17 +338,6 @@ def _ensure_vm_data_disk(name: str, disk_path: str, size_gb: int):
     raise RuntimeError(f"Unable to attach any data disk for {name}. Last error: {last_error}")
 
 
-def _iso_for_role(role: str) -> str:
-    """Pick the install ISO for a VM role (mirrors the real competition topology)."""
-    if role in ("domain_controller", "web_server_win"):
-        return SERVER_2019_ISO      # AD/DNS + Windows Web on Server 2019
-    if role == "ftp_server":
-        return SERVER_2022_ISO      # FTP on Server 2022
-    if role in ("router", "storage"):
-        return SERVER_ISO           # version doesn't matter for these roles
-    return WIN11_ISO                # workstation (and the 'web' placeholder; Ubuntu is linux_manager's job)
-
-
 def create_vm(vm: dict):
     name = vm["name"]
     ram  = vm.get("ram_gb", 2) * 1024
@@ -362,7 +346,7 @@ def create_vm(vm: dict):
     sw   = vm.get("network", SWITCH_NAME)
     role = vm.get("role", "")
     cpu  = vm.get("cpu", 1)
-    iso  = _iso_for_role(role)
+    iso  = SERVER_ISO if role in ("router", "domain_controller", "storage") else WIN11_ISO
 
     vm_path  = os.path.join(LAB_ROOT, name)
     vhd_path = os.path.join(vm_path, f"{name}.vhdx")
@@ -434,26 +418,6 @@ def create_domain_controller_vm():
 def create_workstation_vm():
     create_vm({"name": WORKSTATION_VM, "role": "workstation",       "generation": 2,
                "cpu": 1,  "ram_gb": 2, "disk_gb": 60,  "network": SWITCH_NAME})
-
-def create_ftp_server_vm():
-    """
-    A plain domain-joined Windows Server (NOT a domain controller) that mirrors
-    the real competition topology's FTP box (Server 2022).  Only the VM and the
-    domain join are automated; the FTP role is not installed.  It is a target for
-    testing tooling from a non-DC server box (RSAT AD queries, GPO application,
-    local admin/firewall/credential modules on a server SKU).
-    """
-    create_vm({"name": FTP_SERVER_VM,  "role": "ftp_server",        "generation": 2,
-               "cpu": 2,  "ram_gb": 4, "disk_gb": 60,  "network": SWITCH_NAME})
-
-def create_web_server_vm():
-    """
-    A plain domain-joined Windows Server (NOT a domain controller) that mirrors
-    the real competition topology's Windows Web box (Server 2019).  Same caveat
-    as create_ftp_server_vm(): VM + domain join only, no IIS install.
-    """
-    create_vm({"name": WEB_SERVER_VM,  "role": "web_server_win",    "generation": 2,
-               "cpu": 2,  "ram_gb": 4, "disk_gb": 60,  "network": SWITCH_NAME})
 
 
 # ── Install detection ─────────────────────────────────────────────────────────
@@ -546,8 +510,8 @@ wait_for_vm_install = wait_for_install  # alias
 
 
 def wait_for_all_installs(timeout_minutes: int = 180):
-    """Wait for all base VMs to finish OS install in parallel."""
-    vms    = [ROUTER_VM, DC_VM, WORKSTATION_VM, FTP_SERVER_VM, WEB_SERVER_VM]
+    """Wait for all three base VMs to finish OS install in parallel."""
+    vms    = [ROUTER_VM, DC_VM, WORKSTATION_VM]
     errors = {}
     lock   = threading.Lock()
 
@@ -583,7 +547,7 @@ if ($vm.State -ne "Running") {{
 """)
 
 def start_all_vms():
-    for vm in (ROUTER_VM, DC_VM, WORKSTATION_VM, FTP_SERVER_VM, WEB_SERVER_VM):
+    for vm in (ROUTER_VM, DC_VM, WORKSTATION_VM):
         start_vm(vm)
 
 

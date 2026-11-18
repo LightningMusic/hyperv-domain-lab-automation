@@ -11,10 +11,7 @@ $vmNames = @(
     "AcmeRtr01",
     "AcmePDC01",
     "AcmePDC02",
-    "AcmeWks1001",
-    "AcmeFtp01",
-    "AcmeWeb02",
-    "AcmeWeb01"
+    "AcmeWks1001"
 )
 
 $switchNames = @("AcmeBusiness", "ACME-External")

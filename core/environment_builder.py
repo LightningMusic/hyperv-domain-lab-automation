@@ -7,8 +7,7 @@ import time
 
 from config_loader import (
     load_config, get_router_name, get_dc_name,
-    get_workstation_name, get_ftp_server_name, get_win_web_server_name,
-    get_domain_config
+    get_workstation_name, get_domain_config
 )
 from core.hyperv_manager import (
     verify_environment,
@@ -16,7 +15,6 @@ from core.hyperv_manager import (
     generate_unattend_files,
     create_external_switch,
     create_router_vm, create_domain_controller_vm, create_workstation_vm,
-    create_ftp_server_vm, create_web_server_vm,
     configure_router_network,
     start_all_vms,
     wait_for_all_installs,
@@ -25,7 +23,6 @@ from core.hyperv_manager import (
     join_domain,
     verify_environment_post,
 )
-from core.vm_builder          import build_all
 from core.network_config      import configure_networking
 from core.validators          import vm_exists, domain_exists, dhcp_configured, is_domain_joined, gpo_applied
 from domain.ad_installer      import install_active_directory  as ad_install
@@ -45,8 +42,6 @@ log = get_logger("environment_builder")
 ROUTER_VM      = get_router_name()
 DC_VM          = get_dc_name()
 WORKSTATION_VM = get_workstation_name()
-FTP_SERVER_VM  = get_ftp_server_name()
-WEB_SERVER_VM  = get_win_web_server_name()
 DOMAIN_NAME    = get_domain_config()["name"]
 
 # Track timing for each phase
@@ -91,15 +86,13 @@ def deploy_vms():
     configure_router_network()
     create_domain_controller_vm()
     create_workstation_vm()
-    create_ftp_server_vm()
-    create_web_server_vm()
     start_all_vms()
-    # Wait for all five VMs to finish OS install in parallel
+    # Wait for all three VMs to finish OS install in parallel
     wait_for_all_installs(timeout_minutes=90)
 
 
 def configure_infrastructure():
-    configure_networking([WORKSTATION_VM, FTP_SERVER_VM, WEB_SERVER_VM])
+    configure_networking([WORKSTATION_VM])
     ad_install()
     configure_dns()
     dhcp_install()
@@ -114,10 +107,6 @@ def join_domain_phase():
     join_workstations_to_domain()
     if not is_domain_joined(WORKSTATION_VM):
         raise RuntimeError("Workstation failed to join domain")
-    if not is_domain_joined(FTP_SERVER_VM):
-        raise RuntimeError("FTP server failed to join domain")
-    if not is_domain_joined(WEB_SERVER_VM):
-        raise RuntimeError("Web server failed to join domain")
 
 
 def apply_policies():

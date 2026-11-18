@@ -31,7 +31,6 @@ def configure_dhcp_reservations():
         {"ip":"192.168.4.1", "mac":"00-15-5D-01-01-01","name":"AcmeRtr01"},
         {"ip":"192.168.4.3", "mac":"00-15-5D-01-01-03","name":"AcmePDC01"},
         {"ip":"192.168.4.4", "mac":"00-15-5D-01-01-04","name":"AcmePDC02"},
-        {"ip":"192.168.4.45","mac":"00-15-5D-01-01-45","name":"AcmeWeb01"},
     ]: create_reservation(sid,r["ip"],r["mac"],r["name"])
     configure_wins("192.168.4.3")
     log.info("\n[DHCP-RES] COMPLETE.\n")

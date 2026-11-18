@@ -7,10 +7,7 @@
 
   "install_media": {
     "server_iso":       "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
-    "server_2019_iso":  "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
-    "server_2022_iso":  "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
-    "windows_iso":      "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Windows_11_Eval.iso",
-    "Ubuntu_server_iso":"C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Ubuntu-24.04.4-live-server-amd64.iso"
+    "windows_iso":      "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Windows_11_Eval.iso"
   },
 
   "environment": {
@@ -51,27 +48,10 @@
       "network": "AcmeBusiness", "ip": "192.168.4.100"
     },
     {
-      "name": "AcmeFtp01", "role": "ftp_server",
-      "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 60,
-      "network": "AcmeBusiness",
-      "_note": "Mirrors the real comp topology's FTP box — Server 2022"
-    },
-    {
-      "name": "AcmeWeb02", "role": "web_server_win",
-      "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 60,
-      "network": "AcmeBusiness",
-      "_note": "Mirrors the real comp topology's Windows Web box — Server 2019. Not the same as AcmeWeb01 below (that's the aspirational Ubuntu/Apache entry, unused by the real pipeline)."
-    },
-    {
       "name": "AcmePDC02", "role": "storage",
       "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 60,
       "additional_disks_gb": [30, 30, 30, 30, 30, 50],
       "network": "AcmeBusiness", "ip": "192.168.4.4"
-    },
-    {
-      "name": "AcmeWeb01", "role": "web",
-      "generation": 1, "cpu": 2, "ram_gb": 2, "disk_gb": 40,
-      "network": "AcmeBusiness", "ip": "192.168.4.45"
     }
   ],
 
@@ -143,7 +123,7 @@
   },
 
   "domain_join": {
-    "workstations": ["AcmeWks1001", "AcmeFtp01", "AcmeWeb02"],
+    "workstations": ["AcmeWks1001"],
     "target_ou":    "CorporateOffice/Computers"
   },
 

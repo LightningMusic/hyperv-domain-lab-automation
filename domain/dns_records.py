@@ -34,9 +34,10 @@ def configure_dns_records():
     log.info(f"\n[DNS-RECORDS] Configuring for {domain}\n")
     rev=create_reverse_lookup_zone("192.168.4")
     for name,ip in [("AcmeRtr01","192.168.4.1"),("AcmePDC01","192.168.4.3"),
-                    ("AcmePDC02","192.168.4.4"),("AcmeWeb01","192.168.4.45"),("AcmeWks1001","192.168.4.100")]:
+                    ("AcmePDC02","192.168.4.4"),("AcmeWks1001","192.168.4.100")]:
         create_a_record(name,ip,domain); create_ptr_record(ip,f"{name}.{domain}.",rev)
-    for alias,target in [("testweb",f"AcmeWeb01.{domain}."),("b2b",f"AcmeWeb01.{domain}."),("www",f"AcmeWeb01.{domain}.")]:
+    # CNAME aliases (DNS-records exercise) pointing at hosts that exist in the lab
+    for alias,target in [("dc",f"AcmePDC01.{domain}."),("files",f"AcmePDC02.{domain}.")]:
         create_cname_record(alias,target,domain)
     create_mx_record(f"AcmePDC01.{domain}.",domain)
     _run_on_dc("Clear-DnsServerCache -Force")
