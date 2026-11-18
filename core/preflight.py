@@ -189,14 +189,16 @@ def check_subnet_overlap(facts) -> Check:
 
 # ── Runner ───────────────────────────────────────────────────────────────────
 
-def run_checks(facts: dict | None = None, vm_names: list[str] | None = None) -> list[Check]:
+def run_checks(facts: dict | None = None, vm_names: list[str] | None = None,
+               ram_headroom_gb: int | None = None) -> list[Check]:
     from core.hyperv_manager import CORE_VMS
     facts = facts if facts is not None else host_facts()
     vm_names = list(vm_names or CORE_VMS)
     cfg = get_preflight_config()
+    headroom = cfg["ram_headroom_gb"] if ram_headroom_gb is None else ram_headroom_gb
     checks = [check_hyperv(facts)]
     checks += check_media()
-    checks += [check_disk(cfg["min_free_gb"]), check_ram(facts, vm_names, cfg["ram_headroom_gb"])]
+    checks += [check_disk(cfg["min_free_gb"]), check_ram(facts, vm_names, headroom)]
     checks += check_vm_specs()
     checks += check_vm_collisions(facts, vm_names)
     checks += check_switches(facts)
@@ -214,8 +216,9 @@ def print_report(checks: list[Check]) -> None:
     print(f"\n  {len(checks)} checks: {len(checks) - fails - warns} passed, {warns} warnings, {fails} failed\n")
 
 
-def run_preflight(raise_on_fail: bool = True) -> list[Check]:
-    checks = run_checks()
+def run_preflight(raise_on_fail: bool = True, vm_names: list[str] | None = None,
+                  ram_headroom_gb: int | None = None) -> list[Check]:
+    checks = run_checks(vm_names=vm_names, ram_headroom_gb=ram_headroom_gb)
     print_report(checks)
     if raise_on_fail and any(c.status == "FAIL" for c in checks):
         raise PreflightError("Preflight failed; nothing was changed. Fix the FAIL items above and retry.")

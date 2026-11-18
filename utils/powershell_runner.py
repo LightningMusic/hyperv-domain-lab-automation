@@ -34,6 +34,19 @@ def redact(text):
     return text
 
 
+def child_env() -> dict:
+    """
+    Environment for the powershell.exe (Windows PowerShell 5.1) child.
+
+    When this tool is launched from PowerShell 7 (e.g. the VS Code terminal) the
+    inherited PSModulePath lists PowerShell 7's module folders first; 5.1 then
+    tries to load pwsh-7-only builds of core modules and fails with
+    "ConvertTo-SecureString ... module could not be loaded".  Dropping the
+    variable lets 5.1 compute its own default.
+    """
+    return {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+
+
 class PowerShellRunner:
     def __init__(self, verbose=True, log_file=None, timeout=600):
         self.verbose  = verbose
@@ -79,7 +92,8 @@ class PowerShellRunner:
                 full_cmd,
                 capture_output=True,
                 text=True,
-                timeout=timeout
+                timeout=timeout,
+                env=child_env(),
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"PowerShell timed out after {timeout}s:\n{redact(command)[:200]}")

@@ -1,10 +1,11 @@
 """
 main.py - ACME Hyper-V Lab Automation
 
-Usage: python main.py [command] [--dry-run] [--yes]
+Usage: python main.py [command] [--dry-run] [--yes] [--only router] [--ram-headroom-gb N]
 
   preflight   read-only audit of the host; changes nothing
-  build       stand the lab up (runs preflight first)
+  build       stand the lab up (runs preflight first); --only router builds just
+              the switch + router VM + NAT as a smoke test
   status      show this lab's VMs (only objects this tool owns)
   destroy     remove the lab (only objects this tool owns)
   rebuild     destroy, then build
@@ -31,11 +32,18 @@ from core                     import ownership
 
 def cmd_preflight(opts):
     print("\n🔎 Preflight (read-only)\n")
-    run_preflight(raise_on_fail=False)
+    only = getattr(opts, "only", None)
+    names = None
+    if only == "router":
+        from config_loader import get_router_name
+        names = [get_router_name()]
+    run_preflight(raise_on_fail=False, vm_names=names,
+                  ram_headroom_gb=getattr(opts, "ram_headroom_gb", None))
 
 
 def cmd_build(opts):
-    build_lab()
+    build_lab(only=getattr(opts, "only", None),
+              ram_headroom_gb=getattr(opts, "ram_headroom_gb", None))
 
 
 def cmd_destroy(opts):
@@ -96,6 +104,10 @@ def main():
     parser.add_argument("command", nargs="?", choices=DISPATCH.keys())
     parser.add_argument("--dry-run", action="store_true", help="show what would happen; change nothing")
     parser.add_argument("--yes", action="store_true", help="skip confirmation prompts")
+    parser.add_argument("--only", choices=["router"],
+                        help="build/preflight only part of the lab (router = switch + router VM + NAT smoke test)")
+    parser.add_argument("--ram-headroom-gb", type=int, default=None, metavar="N",
+                        help="override preflight.ram_headroom_gb for this run")
     args = parser.parse_args()
 
     # One-shot mode

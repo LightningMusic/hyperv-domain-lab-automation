@@ -19,7 +19,7 @@ from core.hyperv_manager import (
     verify_environment_post,
 )
 from core.preflight           import run_preflight
-from core.network_config      import configure_networking, renew_dhcp
+from core.network_config      import configure_networking, configure_router, verify_router, renew_dhcp
 from core.validators          import vm_exists, domain_exists, dhcp_configured, is_domain_joined, gpo_applied
 from domain.ad_installer      import install_active_directory  as ad_install
 from domain.dhcp_config       import configure_dhcp            as dhcp_install
@@ -70,11 +70,6 @@ def _run_phase(title: str, func):
 
 # ── Individual phases ─────────────────────────────────────────────────────────
 
-def validate_environment():
-    # Read-only audit; raises (and changes nothing) if anything is wrong.
-    run_preflight()
-
-
 def deploy_vms():
     create_lab_directory()
     generate_unattend_files()
@@ -119,18 +114,44 @@ def validate_environment_post():
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def build_lab():
-    start = time.time()
-    print("\n🚀 FULL LAB DEPLOYMENT STARTED\n")
+def _router_only_phases(ram_headroom_gb):
+    """Smoke test of the network core: switch + router VM + NAT, nothing else."""
+    def validate():
+        run_preflight(vm_names=[ROUTER_VM], ram_headroom_gb=ram_headroom_gb)
 
-    phases = [
-        ("Validation",        validate_environment),
-        ("VM Deployment",     deploy_vms),
-        ("Infrastructure",    configure_infrastructure),
-        ("Domain Join",       join_domain_phase),
-        ("Group Policy",      apply_policies),
-        ("Post Validation",   validate_environment_post),
+    def deploy():
+        create_lab_directory()
+        generate_unattend_files()
+        create_lab_switch()
+        create_router_vm()
+        start_all_vms(names=[ROUTER_VM])
+        wait_for_all_installs(timeout_minutes=60, names=[ROUTER_VM])
+
+    return [
+        ("Validation (router only)", validate),
+        ("Router Deployment",        deploy),
+        ("Router Networking",        configure_router),
+        ("Router Verification",      verify_router),
     ]
+
+
+def build_lab(only: str | None = None, ram_headroom_gb: int | None = None):
+    start = time.time()
+    if only == "router":
+        print("\n🚀 ROUTER-ONLY DEPLOYMENT STARTED (switch + router VM + NAT)\n")
+        phases = _router_only_phases(ram_headroom_gb)
+    elif only:
+        raise ValueError(f"unknown build scope: {only!r}")
+    else:
+        print("\n🚀 FULL LAB DEPLOYMENT STARTED\n")
+        phases = [
+            ("Validation",        lambda: run_preflight(ram_headroom_gb=ram_headroom_gb)),
+            ("VM Deployment",     deploy_vms),
+            ("Infrastructure",    configure_infrastructure),
+            ("Domain Join",       join_domain_phase),
+            ("Group Policy",      apply_policies),
+            ("Post Validation",   validate_environment_post),
+        ]
 
     for title, func in phases:
         _run_phase(title, func)

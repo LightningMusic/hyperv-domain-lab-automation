@@ -505,8 +505,8 @@ def start_vm(name: str, first_boot: bool = False):
         _send_boot_keypress(name)
 
 
-def start_all_vms(first_boot: bool = True):
-    for vm in CORE_VMS:
+def start_all_vms(first_boot: bool = True, names=None):
+    for vm in (names or CORE_VMS):
         start_vm(vm, first_boot=first_boot)
 
 
@@ -563,6 +563,41 @@ def is_windows_installed(vm_name: str) -> bool:
         return False
 
 
+_BOOT_TIME_PS = "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('o')"
+
+
+def _guest_boot_time(vm_name: str):
+    try:
+        out = run_ps(_direct_script(vm_name, _BOOT_TIME_PS), return_output=True, timeout=60)
+        return out.strip() or None
+    except Exception:
+        return None
+
+
+def reboot_vm(vm_name: str, timeout_minutes: int = 15, poll: int = 10):
+    """
+    Gracefully restart one of OUR VMs and wait until the guest has genuinely
+    come back (its boot time changed and PowerShell Direct answers again).
+    Role installs (Routing, AD DS ...) finish their servicing during this reboot.
+    """
+    ownership.assert_vm_allowed(vm_name)
+    rec = _vm_record(vm_name)
+    if not rec or not rec.get("Owned"):
+        raise ownership.OwnershipError(f"VM '{vm_name}' is not owned by this lab; refusing to restart it.")
+    before = _guest_boot_time(vm_name)
+    log.info(f"[REBOOT] Restarting {vm_name} (boot time before: {before})")
+    run_ps(f'Restart-VM -Name "{vm_name}" -Force', timeout=300)
+
+    deadline = time.time() + timeout_minutes * 60
+    while time.time() < deadline:
+        time.sleep(poll)
+        now = _guest_boot_time(vm_name)
+        if now and now != before:
+            log.info(f"[REBOOT] {vm_name} is back up (boot time {now})")
+            return
+    raise TimeoutError(f"{vm_name} did not come back within {timeout_minutes}m after restart")
+
+
 def wait_for_install(vm_name: str, timeout_minutes: int = 120, poll: int = 30) -> bool:
     deadline = time.time() + timeout_minutes * 60
     last     = None
@@ -588,9 +623,9 @@ def wait_for_install(vm_name: str, timeout_minutes: int = 120, poll: int = 30) -
 wait_for_vm_install = wait_for_install  # alias
 
 
-def wait_for_all_installs(timeout_minutes: int = 120):
-    """Wait for all core VMs to finish OS install in parallel."""
-    vms    = list(CORE_VMS)
+def wait_for_all_installs(timeout_minutes: int = 120, names=None):
+    """Wait for the given VMs (default: all core VMs) to finish OS install in parallel."""
+    vms    = list(names or CORE_VMS)
     errors = {}
     lock   = threading.Lock()
 

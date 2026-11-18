@@ -75,6 +75,29 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(redact(""), "")
 
 
+class ChildEnvTests(unittest.TestCase):
+    def test_pwsh7_module_path_is_not_inherited(self):
+        import os
+        import unittest.mock as m
+        from utils.powershell_runner import child_env
+        with m.patch.dict(os.environ, {"PSModulePath": r"C:\Program Files\PowerShell\7\Modules", "KEEP": "1"}):
+            env = child_env()
+        self.assertNotIn("PSMODULEPATH", {k.upper() for k in env})
+        self.assertEqual(env.get("KEEP"), "1")          # everything else is passed through
+
+
+class RouterScriptTests(unittest.TestCase):
+    def test_no_unfilled_placeholders_and_reboot_stage_is_separate(self):
+        import re
+        from core import network_config as nc
+        prep = nc._fill(nc._ROUTER_PREP, gateway="192.168.4.1", prefix="24")
+        self.assertIsNone(re.search(r"__[A-Z]+__", prep))
+        self.assertIsNone(re.search(r"__[A-Z]+__", nc._ROUTER_NAT))
+        self.assertIn("NEEDS_REBOOT", prep)                       # stage 1 reports the need
+        self.assertNotIn("Install-RemoteAccess", prep)            # ...and never uses the role itself
+        self.assertIn("Install-RemoteAccess", nc._ROUTER_NAT)     # stage 2 (post-reboot) does
+
+
 class UnattendTests(unittest.TestCase):
     def setUp(self):
         import core.hyperv_manager as hv
