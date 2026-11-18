@@ -10,6 +10,5 @@ Expected files:
 | `SERVER2019_EVAL_x64FRE_en-us.iso`             | Domain controller, Windows web server      |
 | `SERVER2022_EVAL_x64FRE_en-us.iso`             | FTP server (and router/storage fallback)   |
 | `Windows_11_Eval.iso`                          | Workstation                                |
-| `ubuntu-24.04.4-live-server-amd64.iso`         | Linux web server (not wired in yet)        |
 
 The Microsoft evaluation ISOs come from the Microsoft Evaluation Center.
