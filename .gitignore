@@ -1,20 +1,59 @@
-# Ignore Python cache
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
-
-# Ignore logs
-logs/*.log
-
-# Ignore VM storage
-LabVMs/
-
-# Ignore install media (VERY IMPORTANT)
-install_media/*.iso
-
-# Ignore OS-generated junk
-Thumbs.db
-.DS_Store
-
-# Ignore virtual environments (if you ever add one)
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
 venv/
 .env/
+.env
+
+# ── Everything the tool generates stays out of git ───────────────────────────
+LabVMs/
+images/
+state/
+build/
+temp_unattend/
+deployment_state.json
+deployment_state.txt
+
+# Logs (keep the package marker)
+logs/*
+!logs/__init__.py
+
+# ── Install media: never commit ISOs / images ────────────────────────────────
+# (drop your ISOs in install_media/; see install_media/README.md)
+install_media/*
+!install_media/README.md
+*.iso
+*.wim
+*.esd
+*.partial
+
+# ── Virtual disks and Hyper-V artifacts ──────────────────────────────────────
+*.vhd
+*.vhdx
+*.avhdx
+*.vhds
+*.vmcx
+*.vmrs
+*.vmgs
+
+# ── Secrets and keys (this repo is public) ───────────────────────────────────
+.secrets/
+secrets/
+*.secret
+*.secrets.json
+*.local.json
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+known_hosts
+
+# ── Local tooling / OS junk ──────────────────────────────────────────────────
+.claude/settings.local.json
+Thumbs.db
+.DS_Store
+*.swp
