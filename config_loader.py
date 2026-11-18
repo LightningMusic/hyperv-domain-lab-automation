@@ -33,15 +33,35 @@ def reload_config():
     return load_config()
 
 
+class ConfigError(ValueError):
+    """The configuration asks for something this tool refuses to do."""
+
+
+def is_within_project(path) -> bool:
+    """True if `path` resolves to somewhere inside the project folder."""
+    try:
+        Path(path).resolve().relative_to(PROJECT_ROOT)
+        return True
+    except ValueError:
+        return False
+
+
 def _abs(relative_or_absolute: str) -> str:
     """
-    Return an absolute path.  If the config value is already absolute, use it.
-    Otherwise resolve it relative to the project root.
+    Return an absolute path, resolved against the project root if relative.
+
+    CONTAINMENT: every path this tool reads or writes must stay inside the
+    project folder.  A config value that resolves anywhere else (an absolute
+    path to another drive, a '..' escape, a symlink out) is rejected.
     """
     p = Path(relative_or_absolute)
-    if p.is_absolute():
-        return str(p)
-    return str(PROJECT_ROOT / p)
+    p = (p if p.is_absolute() else PROJECT_ROOT / p).resolve()
+    if not is_within_project(p):
+        raise ConfigError(
+            f"Path '{relative_or_absolute}' resolves to '{p}', which is outside "
+            f"the project folder '{PROJECT_ROOT}'. Use a path relative to the project."
+        )
+    return str(p)
 
 
 # ------------------------------------------------------------------ PATHS ---
@@ -112,12 +132,31 @@ def get_hyperv_config():
     return load_config().get("hyperv", {})
 
 
+def get_lab_id():
+    """Short id used to tag every Hyper-V object this lab creates."""
+    return get_hyperv_config().get("lab_id", "acme")
+
+
 def get_internal_switch():
+    """Name of the lab's PRIVATE switch."""
     return get_hyperv_config().get("internal_switch", "AcmeBusiness")
 
 
-def get_external_switch():
-    return get_hyperv_config().get("external_switch", "ACME-External")
+def get_uplink_switch_name():
+    return get_hyperv_config().get("uplink_switch", "Default Switch")
+
+
+def get_uplink_switch_id():
+    """Well-known GUID of Hyper-V's built-in Default Switch (name can be localized)."""
+    return get_hyperv_config().get("uplink_switch_id", "C08CB7B8-9B3C-408E-8E30-5E16A3AEB444")
+
+
+def get_preflight_config():
+    cfg = load_config().get("preflight", {})
+    return {
+        "min_free_gb":     int(cfg.get("min_free_gb", 120)),
+        "ram_headroom_gb": int(cfg.get("ram_headroom_gb", 8)),
+    }
 
 
 # -------------------------------------------------------- VIRTUAL MACHINES --

@@ -5,6 +5,8 @@ Always uses absolute paths so CWD doesn't matter.
 """
 import subprocess
 import ctypes
+import json
+import re
 import sys
 import os
 from pathlib import Path
@@ -14,6 +16,22 @@ from datetime import datetime
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _LOG_DIR  = _PROJECT_ROOT / "logs"
 _LOG_FILE = _LOG_DIR / "deployment.log"
+
+
+_SECRET_PATTERNS = (
+    re.compile(r'(ConvertTo-SecureString\s+")[^"]*(")', re.IGNORECASE),
+    re.compile(r"(ConvertTo-SecureString\s+')[^']*(')", re.IGNORECASE),
+    re.compile(r"(<Value>)[^<]*(</Value>)", re.IGNORECASE),
+)
+
+
+def redact(text):
+    """Mask passwords before anything is printed, logged or put in an error."""
+    if not text:
+        return text
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(r"\1********\2", text)
+    return text
 
 
 class PowerShellRunner:
@@ -43,8 +61,10 @@ class PowerShellRunner:
             print("ERROR: Must be run as Administrator.")
             sys.exit(1)
 
-    def run(self, command, return_output=False, ignore_stderr=False):
-        self.log(f"PS> {command[:300].strip()}")
+    def run(self, command, return_output=False, ignore_stderr=False, timeout=None, quiet=False):
+        """quiet=True: do not write the command's stdout to the log or console."""
+        timeout = timeout or self.timeout
+        self.log(f"PS> {redact(command)[:300].strip()}")
         wrapped_command = (
             "$ErrorActionPreference = 'Stop'; "
             "$ProgressPreference = 'SilentlyContinue'; "
@@ -59,23 +79,23 @@ class PowerShellRunner:
                 full_cmd,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout
+                timeout=timeout
             )
         except subprocess.TimeoutExpired:
-            raise RuntimeError(f"PowerShell timed out after {self.timeout}s:\n{command[:200]}")
+            raise RuntimeError(f"PowerShell timed out after {timeout}s:\n{redact(command)[:200]}")
 
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
 
-        if stdout:
-            self.log(f"OUT: {stdout}")
+        if stdout and not quiet:
+            self.log(f"OUT: {redact(stdout)}")
         if stderr:
-            self.log(f"ERR: {stderr}")
+            self.log(f"ERR: {redact(stderr)}")
 
         if result.returncode != 0 and not ignore_stderr:
             raise RuntimeError(
                 f"PowerShell failed (exit {result.returncode}).\n"
-                f"CMD: {command[:300]}\nERR: {stderr}"
+                f"CMD: {redact(command)[:300]}\nERR: {redact(stderr)}"
             )
 
         return stdout if return_output else None
@@ -91,8 +111,25 @@ class PowerShellRunner:
 _runner = PowerShellRunner(verbose=True, log_file=_LOG_FILE)
 
 
-def run_ps(command, return_output=False, ignore_stderr=False):
-    return _runner.run(command, return_output=return_output, ignore_stderr=ignore_stderr)
+def run_ps(command, return_output=False, ignore_stderr=False, timeout=None):
+    return _runner.run(command, return_output=return_output,
+                       ignore_stderr=ignore_stderr, timeout=timeout)
+
+
+def run_ps_json(command, timeout=None):
+    """
+    Run a PowerShell snippet whose last pipeline emits objects, and return them
+    parsed from JSON (None for no output, a list if several objects).
+    The snippet must NOT call ConvertTo-Json itself.
+    """
+    out = _runner.run(
+        f"$__r = & {{ {command} }}; if ($null -ne $__r) {{ ConvertTo-Json -InputObject @($__r) -Compress -Depth 4 }}",
+        return_output=True, timeout=timeout, quiet=True,
+    )
+    if not out:
+        return None
+    data = json.loads(out)
+    return data[0] if isinstance(data, list) and len(data) == 1 else data
 
 
 def run_ps_script(path):

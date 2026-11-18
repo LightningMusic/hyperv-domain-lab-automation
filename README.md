@@ -126,10 +126,11 @@ Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All
 
 ## ▶️ Usage
 
-Run the deployment:
+Audit the host first (read-only, changes nothing), then build:
 
 ```
-python main.py
+python main.py preflight
+python main.py build
 ```
 
 This will:
@@ -145,18 +146,17 @@ This will:
 
 ## 🧹 Cleanup
 
-Destroy the lab environment completely:
+Preview, then remove the lab:
 
 ```
-.\destroy_lab.ps1
+python main.py destroy --dry-run
+python main.py destroy
 ```
 
-This will:
-
-* Stop and remove all VMs
-* Delete virtual disks
-* Remove virtual switches
-* Clean up all lab files
+Teardown only removes objects this tool created: a VM or switch is removed only if its
+name is in the config **and** it carries the lab's ownership tag in its Hyper-V Notes.
+Anything else on the host is reported and left alone. Disks are only deleted from inside
+this project folder.
 
 ---
 

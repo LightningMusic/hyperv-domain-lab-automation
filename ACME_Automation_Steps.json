@@ -1,13 +1,18 @@
 {
   "paths": {
-    "lab_root":    "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\LabVMs",
-    "unattend_dir":"C:\\CVNP-Python\\Python Projects\\Lab Deployment\\temp_unattend",
-    "log_dir":     "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\logs"
+    "lab_root":     "LabVMs",
+    "unattend_dir": "temp_unattend",
+    "log_dir":      "logs"
   },
 
   "install_media": {
-    "server_iso":       "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\SERVER_EVAL_x64FRE_en-us.iso",
-    "windows_iso":      "C:\\CVNP-Python\\Python Projects\\Lab Deployment\\install_media\\Windows_11_Eval.iso"
+    "server_iso":  "install_media/SERVER2022_EVAL_x64FRE_en-us.iso",
+    "windows_iso": "install_media/Windows_11_Eval.iso"
+  },
+
+  "preflight": {
+    "min_free_gb":      120,
+    "ram_headroom_gb":  8
   },
 
   "environment": {
@@ -23,17 +28,17 @@
   },
 
   "hyperv": {
+    "lab_id":          "acme",
     "internal_switch": "AcmeBusiness",
-    "external_switch": "ACME-External",
-    "switches": [
-      { "name": "AcmeBusiness", "type": "Internal" }
-    ]
+    "uplink_switch":   "Default Switch",
+    "uplink_switch_id":"C08CB7B8-9B3C-408E-8E30-5E16A3AEB444",
+    "_note": "internal_switch is created as a PRIVATE switch (no host IP, no host NAT). Only the router VM reaches the internet, via its own second NIC on Hyper-V's built-in Default Switch."
   },
 
   "virtual_machines": [
     {
       "name": "AcmeRtr01", "role": "router",
-      "generation": 2, "cpu": 1, "ram_gb": 1, "disk_gb": 10,
+      "generation": 2, "cpu": 1, "ram_gb": 2, "disk_gb": 32,
       "network": "AcmeBusiness", "ip": "192.168.4.1"
     },
     {
@@ -44,7 +49,7 @@
     },
     {
       "name": "AcmeWks1001", "role": "workstation",
-      "generation": 2, "cpu": 1, "ram_gb": 2, "disk_gb": 60,
+      "generation": 2, "cpu": 2, "ram_gb": 4, "disk_gb": 80,
       "network": "AcmeBusiness", "ip": "192.168.4.100"
     },
     {

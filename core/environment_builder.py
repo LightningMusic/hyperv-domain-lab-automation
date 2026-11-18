@@ -10,20 +10,16 @@ from config_loader import (
     get_workstation_name, get_domain_config
 )
 from core.hyperv_manager import (
-    verify_environment,
     create_lab_directory,
     generate_unattend_files,
-    create_external_switch,
+    create_lab_switch,
     create_router_vm, create_domain_controller_vm, create_workstation_vm,
-    configure_router_network,
     start_all_vms,
     wait_for_all_installs,
-    install_active_directory,
-    configure_dhcp,
-    join_domain,
     verify_environment_post,
 )
-from core.network_config      import configure_networking
+from core.preflight           import run_preflight
+from core.network_config      import configure_networking, renew_dhcp
 from core.validators          import vm_exists, domain_exists, dhcp_configured, is_domain_joined, gpo_applied
 from domain.ad_installer      import install_active_directory  as ad_install
 from domain.dhcp_config       import configure_dhcp            as dhcp_install
@@ -75,20 +71,20 @@ def _run_phase(title: str, func):
 # ── Individual phases ─────────────────────────────────────────────────────────
 
 def validate_environment():
-    verify_environment()
+    # Read-only audit; raises (and changes nothing) if anything is wrong.
+    run_preflight()
 
 
 def deploy_vms():
     create_lab_directory()
     generate_unattend_files()
-    create_external_switch()
-    create_router_vm()
-    configure_router_network()
+    create_lab_switch()                  # PRIVATE switch: no host IP / NAT / bridge
+    create_router_vm()                   # 2nd NIC "Uplink" on the Default Switch
     create_domain_controller_vm()
     create_workstation_vm()
-    start_all_vms()
+    start_all_vms()                      # also presses the "boot from DVD" key
     # Wait for all three VMs to finish OS install in parallel
-    wait_for_all_installs(timeout_minutes=90)
+    wait_for_all_installs(timeout_minutes=120)
 
 
 def configure_infrastructure():
@@ -104,6 +100,7 @@ def configure_infrastructure():
 
 
 def join_domain_phase():
+    renew_dhcp(WORKSTATION_VM)           # the DC's DHCP server is up now: get a lease + DNS
     join_workstations_to_domain()
     if not is_domain_joined(WORKSTATION_VM):
         raise RuntimeError("Workstation failed to join domain")
